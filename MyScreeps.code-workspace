@@ -1,11 +1,13 @@
 {
-	"folders": [
-		{
-			"path": "."
-		},
-		{
-			"path": ".git"
-		}
-	],
-	"settings": {}
+  "folders": [
+    {
+      "path": "."
+    },
+    {
+      "path": ".git"
+    }
+  ],
+  "settings": {
+    "git.autorefresh": true
+  }
 }
