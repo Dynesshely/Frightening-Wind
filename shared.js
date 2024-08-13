@@ -16,9 +16,11 @@ module.exports.Room = class {
         this.exits = this.room.find(FIND_EXIT);
         
         this.logistics = new logistics.Logistics(
+            this.controller,
             () => this.spawns,
             () => this.creeps,
             () => this.sources,
+            () => this.flags,
         );
     }
     
@@ -35,6 +37,8 @@ module.exports.Room = class {
         this.logistics.prepairCreeps();
         
         this.logistics.harvestSource();
+        
+        this.logistics.gotoBorn();
     }
 };
 
