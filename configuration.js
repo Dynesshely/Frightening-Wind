@@ -2,7 +2,7 @@ module.exports.Config = class {
   constructor() {
     this.basicRoomCreepsCount = {
       'worker': 6,
-      'builder': 3,
+      'builder': 6,
       'miner': 3,
       'soldier': 5,
       'shooter': 3,
