@@ -70,6 +70,8 @@ module.exports.Logistics = class {
 
                 switch (result) {
                     case OK:
+                        logger.log('            -     Creep `' + name + '` generated');
+
                         var creep = Game.creeps[name];
 
                         creep.memory.role = type;
@@ -174,8 +176,42 @@ module.exports.Logistics = class {
         }
     }
 
-    build() {
+    buildStructures() {
+        this.autoBuild();
+    }
 
+    autoBuild() {
+        var creeps = this.getCreeps();
+        var builders = this.queryCreeps(creeps, 'builder');
+
+        for (let builder of builders) {
+            if (builder.store.getFreeCapacity() > 0) {
+                var spawn = Game.getObjectById(builder.memory.spawn);
+                var result = builder.withdraw(spawn, RESOURCE_ENERGY);
+
+                switch (result) {
+                    case OK:
+                        break;
+                    case ERR_NOT_IN_RANGE:
+                        builder.moveTo(spawn);
+                        break;
+                }
+            } else {
+                var sites = this.controller.room.find(FIND_CONSTRUCTION_SITES);
+                if (sites.length > 0) {
+                    var site = sites[0];
+                    var result = builder.build(site);
+
+                    switch (result) {
+                        case OK:
+                            break;
+                        case ERR_NOT_IN_RANGE:
+                            builder.moveTo(site);
+                            break;
+                    }
+                }
+            }
+        }
     }
 
     gotoBorn() {
