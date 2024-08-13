@@ -40,6 +40,8 @@ module.exports.Logistics = class {
         for (let key of Object.keys(base)) {
             var value = base[key];
             if (this.queryCreeps(creeps, key).length < value) {
+                logger.log('            - Generating creep `' + key + '`');
+
                 this.generateCreep(spawns, key);
                 return;
             }

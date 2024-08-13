@@ -2,9 +2,10 @@ const dispatcher = require('dispatcher');
 const logger = require('logger');
 
 logger.log('');
-logger.log('+-----------------------+');
-logger.log('| Application Started ! |');
-logger.log('+-----------------------+');
+logger.log('+-------------------------+');
+logger.log('| & Application Started ! |');
+logger.log('+-------------------------+');
+logger.log('');
 
 const mainDispatcher = new dispatcher.Dispatcher('W7N2');
 

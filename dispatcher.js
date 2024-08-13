@@ -3,7 +3,7 @@ const shared = require('shared');
 
 module.exports.Dispatcher = class {
     constructor(originRoomName) {
-        logger.log('Inited new dispatcher with `originRoomName`: ' + originRoomName);
+        logger.log('+ Inited new dispatcher with `originRoomName`: ' + originRoomName);
 
         this.originRoomName = originRoomName;
         this.originRoom = new shared.Room(originRoomName);
@@ -20,7 +20,7 @@ module.exports.Dispatcher = class {
 
     dispatch() {
         logger.log('');
-        logger.log('Dispatching rooms');
+        logger.log('+ Dispatching rooms');
 
         for (let room of this.myRooms) {
             logger.log('    - Dispatching room with `name`: ' + room.name);

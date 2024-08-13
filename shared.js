@@ -50,6 +50,11 @@ module.exports.Room = class {
         this.logistics.harvestSource();
 
 
+        logger.log('        - Build structures');
+
+        this.logistics.buildStructures();
+
+
         logger.log('        - Goto born flag');
 
         this.logistics.gotoBorn();
