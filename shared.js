@@ -39,6 +39,8 @@ module.exports.Room = class {
         this.logistics.harvestSource();
         
         this.logistics.gotoBorn();
+        
+        this.logistics.cleanCreepsMemory();
     }
 };
 

@@ -45,6 +45,18 @@ module.exports.Logistics = class {
         }
     }
     
+    cleanCreepsMemory() {
+        var toRemove = [];
+        for (let creepName of Object.keys(Memory.creeps)) {
+            if (Object.keys(Game.creeps).indexOf(creepName) == -1) {
+                toRemove.push(creepName);
+            }
+        }
+        for (let name of toRemove) {
+            delete Memory.creeps[name];
+        }
+    }
+    
     generateCreep(spawns, type) {
         var name = 'creep-<type>-<time>'.replace('<type>', type).replace('<time>', dateTime.toISOString());
         
@@ -76,7 +88,7 @@ module.exports.Logistics = class {
         var minCount = 10000;
         var minSource = '';
         
-        console.log(JSON.stringify(this.sourcesWorkers));
+        // console.log(JSON.stringify(this.sourcesWorkers));
         
         for (let id of Object.keys(this.sourcesWorkers)) {
             var workers = this.sourcesWorkers[id];
@@ -146,12 +158,12 @@ module.exports.Logistics = class {
                     
                     switch (result) {
                         case OK:
-                            if (worker.store.getUsedCapacity == 0) {
-                                worker.memory.task = 'normal';
-                            }
                             break;
                         case ERR_NOT_IN_RANGE:
                             worker.moveTo(this.controller);
+                            break;
+                        case ERR_NOT_ENOUGH_RESOURCES:
+                            worker.memory.task = 'normal';
                             break;
                     }
                     break;
