@@ -28,6 +28,7 @@ module.exports.Config = class {
     };
 
     this.minTtlToRecycle = 300;
+    this.minWallHits = 1000;
   }
 };
 

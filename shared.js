@@ -25,6 +25,7 @@ module.exports.Room = class {
             () => this.sources,
             () => this.flags,
             () => this.tombstones,
+            () => this.structures,
             () => this.extensions,
         );
 

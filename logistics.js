@@ -4,16 +4,15 @@ const utils = require('utils');
 
 const config = new configuration.Config();
 
-const dateTime = new Date();
-
 module.exports.Logistics = class {
-    constructor(controller, getSpawns, getCreeps, getSources, getFlags, getTombstones, getExtensions) {
+    constructor(controller, getSpawns, getCreeps, getSources, getFlags, getTombstones, getStructures, getExtensions) {
         this.controller = controller;
         this.getSpawns = getSpawns;
         this.getCreeps = getCreeps;
         this.getSources = getSources;
         this.getFlags = getFlags;
         this.getTombstones = getTombstones;
+        this.getStructures = getStructures;
         this.getExtensions = getExtensions;
 
         this.sourcesWorkers = {};
@@ -148,7 +147,7 @@ module.exports.Logistics = class {
                     } else {
                         worker.say('🏠');
 
-                        var extensions = this.getExtensions();
+                        var extensions = _.filter(this.getExtensions(), (ext) => ext.store.getFreeCapacity() > 0);
                         var spawn = Game.getObjectById(worker.memory.spawn);
                         var target = utils.findMostClose([spawn].concat(extensions), worker);
                         var result = worker.transfer(target, RESOURCE_ENERGY);
@@ -160,7 +159,8 @@ module.exports.Logistics = class {
                                 worker.moveTo(target);
                                 break;
                             case ERR_FULL:
-                                worker.memory.task = 'upgrade';
+                                if (extensions.length == 0)
+                                    worker.memory.task = 'upgrade';
                                 break;
                             default:
                                 console.log('    Unknown error: ' + result);
@@ -197,7 +197,7 @@ module.exports.Logistics = class {
         var builders = this.queryCreeps(creeps, 'builder');
 
         for (let builder of builders) {
-            if (builder.store.getFreeCapacity() > 0) {
+            if (builder.store.getUsedCapacity() == 0) {
                 builder.say('🖐');
 
                 var tombstones = this.getTombstones();
@@ -214,17 +214,10 @@ module.exports.Logistics = class {
                             break;
                     }
                 } else {
-                    var sources = this.getSources();
+                    var extensions = _.filter(this.getExtensions(), (ext) => ext.store.getUsedCapacity() > 0);
                     var spawn = Game.getObjectById(builder.memory.spawn);
-                    var target = utils.findMostClose([spawn].concat(sources), builder);
-
-                    var result = 0;
-
-                    if (target.structureType == STRUCTURE_SPAWN) {
-                        var result = builder.withdraw(target, RESOURCE_ENERGY);
-                    } else {
-                        var result = builder.harvest(target);
-                    }
+                    var target = utils.findMostClose([spawn].concat(extensions), builder);
+                    var result = builder.withdraw(target, RESOURCE_ENERGY);
 
                     switch (result) {
                         case OK:
@@ -237,7 +230,7 @@ module.exports.Logistics = class {
             } else {
                 var sites = this.controller.room.find(FIND_CONSTRUCTION_SITES);
                 if (sites.length > 0) {
-                    var site = sites[0];
+                    var site = utils.findMostClose(sites, builder);
 
                     var extensions = _.filter(sites, (site) => site.structureType == STRUCTURE_EXTENSION);
 
@@ -263,6 +256,27 @@ module.exports.Logistics = class {
                             break;
                         case ERR_NOT_IN_RANGE:
                             builder.moveTo(site);
+                            break;
+                    }
+                } else {
+                    builder.say('🔧');
+
+                    var structures = this.controller.room.find(FIND_STRUCTURES);
+                    var walls = _.filter(
+                        structures,
+                        (structure) => structure.structureType == STRUCTURE_WALL && structure.hits < config.minWallHits
+                    );
+
+                    var target = utils.findMostClose(walls, builder);
+                    var result = builder.repair(target);
+
+                    logger.log('            - Repairing structure ' + result);
+
+                    switch (result) {
+                        case OK:
+                            break;
+                        case ERR_NOT_IN_RANGE:
+                            builder.moveTo(target);
                             break;
                     }
                 }
