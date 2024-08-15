@@ -14,8 +14,18 @@ module.exports.Config = class {
       'builder': [MOVE, WORK, CARRY],
       'miner': [MOVE, WORK, CARRY],
       'soldier': [MOVE, ATTACK],
-      'shooter': [MOVE, ATTACK, RANGED_ATTACK],
+      'shooter': [MOVE, RANGED_ATTACK],
       'doctor': [MOVE, HEAL],
+    };
+
+    // If RCL > 4
+    this.enhancedRoomCreepsBody = {
+      'worker': [MOVE, MOVE, MOVE, WORK, WORK, CARRY, CARRY],
+      'builder': [MOVE, MOVE, WORK, WORK, WORK, CARRY, CARRY],
+      'miner': [MOVE, MOVE, WORK, WORK, WORK, CARRY, CARRY, CARRY],
+      'soldier': [MOVE, MOVE, ATTACK, ATTACK, ATTACK],
+      'shooter': [MOVE, MOVE, MOVE, RANGED_ATTACK, RANGED_ATTACK],
+      'doctor': [MOVE, MOVE, MOVE, HEAL, HEAL, HEAL],
     };
 
     this.creepsMinRcl = {
@@ -29,6 +39,7 @@ module.exports.Config = class {
 
     this.minTtlToRecycle = 300;
     this.minWallHits = 1000;
+    this.minRampartsHits = 5000;
   }
 };
 

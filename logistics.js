@@ -62,12 +62,12 @@ module.exports.Logistics = class {
 
             name = name.replace('<spawn>', spawn.id);
 
-            var body = config.basicRoomCreepsBody[type];
+            var body = this.controller.level > 4 ? config.enhancedRoomCreepsBody[type] : config.basicRoomCreepsBody[type];
             var result = spawn.spawnCreep(body, name);
 
             switch (result) {
                 case OK:
-                    logger.log('            -     Creep `' + name + '` generated');
+                    logger.log('            -     Creep `' + name + '` generated with ' + body);
 
                     var creep = Game.creeps[name];
 
@@ -147,9 +147,12 @@ module.exports.Logistics = class {
                     } else {
                         worker.say('🏠');
 
-                        var extensions = _.filter(this.getExtensions(), (ext) => ext.store.getFreeCapacity() > 0);
+                        var extensions = _.filter(this.getExtensions(), (ext) => ext.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || ext.store == undefined);
                         var spawn = Game.getObjectById(worker.memory.spawn);
                         var target = utils.findMostClose([spawn].concat(extensions), worker);
+
+                        if (target == undefined) target = spawn;
+
                         var result = worker.transfer(target, RESOURCE_ENERGY);
 
                         switch (result) {
@@ -163,7 +166,7 @@ module.exports.Logistics = class {
                                     worker.memory.task = 'upgrade';
                                 break;
                             default:
-                                console.log('    Unknown error: ' + result);
+                                logger.log('            - Unknown error: ' + result + ' & target detail: ' + JSON.stringify(target));
                                 break;
                         }
                     }
@@ -199,6 +202,8 @@ module.exports.Logistics = class {
         for (let builder of builders) {
             if (builder.store.getUsedCapacity() == 0) {
                 builder.say('🖐');
+
+                builder.memory.task = 'fetching';
 
                 var tombstones = this.getTombstones();
 
@@ -249,6 +254,8 @@ module.exports.Logistics = class {
 
                     logger.log('            - Building structure `' + site.structureType + '` ' + site.pos);
 
+                    builder.memory.task = 'building';
+
                     var result = builder.build(site);
 
                     switch (result) {
@@ -267,17 +274,63 @@ module.exports.Logistics = class {
                         (structure) => structure.structureType == STRUCTURE_WALL && structure.hits < config.minWallHits
                     );
 
-                    var target = utils.findMostClose(walls, builder);
-                    var result = builder.repair(target);
+                    var targets = walls;
 
-                    logger.log('            - Repairing structure ' + result);
+                    // if (targets.length == 0) {
+                    //     var ramparts = _.filter(
+                    //         this.getStructures(),
+                    //         (structure) => structure.structureType == STRUCTURE_RAMPART && structure.hits < config.minRampartHits
+                    //     );
+                    //     targets = ramparts;
+                    // }
 
-                    switch (result) {
-                        case OK:
-                            break;
-                        case ERR_NOT_IN_RANGE:
-                            builder.moveTo(target);
-                            break;
+                    // // Below leads to repairing same wall
+
+                    // if (targets.length == 0) {
+                    //     targets = _.filter(structures,
+                    //         (structure) => structure.structureType == STRUCTURE_WALL
+                    //     );
+                    // }
+
+                    if (targets.length == 0) {
+                        var towers = _.filter(
+                            this.getStructures(),
+                            (structure) => structure.structureType == STRUCTURE_TOWER
+                        );
+                        targets = _.filter(towers, (tower) => tower.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+                    }
+
+                    var target = utils.findMostClose(targets, builder);
+
+                    if (target == undefined) {
+                        var bornFlag = _.filter(this.getFlags(), (flag) => flag.name == 'Born')[0];
+                        var result = builder.moveTo(bornFlag);
+
+                        builder.memory.task = 'pending';
+                    } else {
+
+                        builder.memory.task = 'repairing';
+
+                        var result = 0;
+                        if (target.structureType && target.structureType == STRUCTURE_TOWER) {
+                            var result = builder.transfer(target, RESOURCE_ENERGY);
+                        } else {
+                            var result = builder.repair(target);
+                        }
+
+                        logger.log('            - Repairing structure ' + result);
+
+                        switch (result) {
+                            case OK:
+                                break;
+                            case ERR_NOT_IN_RANGE:
+                                builder.moveTo(target);
+                                break;
+                            default:
+                                logger.log('            -     Failed ' + result);
+                                logger.log('            -     Target detail ' + JSON.stringify(target));
+                                break;
+                        }
                     }
                 }
             }
