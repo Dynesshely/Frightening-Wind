@@ -76,4 +76,3 @@ module.exports.Room = class {
         this.logistics.recycleCreeps();
     }
 };
-

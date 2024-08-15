@@ -1,5 +1,6 @@
 const configuration = require('configuration');
 const logger = require('logger');
+const utils = require('utils');
 
 const config = new configuration.Config();
 
@@ -147,11 +148,7 @@ module.exports.Logistics = class {
 
                         var extensions = this.getExtensions();
                         var spawn = Game.getObjectById(worker.memory.spawn);
-                        var targets = [spawn].concat(extensions);
-                        var distances = _.map(targets, (target) => worker.pos.getRangeTo(target));
-                        var min = Math.min(...distances);
-                        var index = distances.indexOf(min);
-                        var target = targets[index];
+                        var target = utils.findMostClose([spawn].concat(extensions), worker);
                         var result = worker.transfer(target, RESOURCE_ENERGY);
 
                         switch (result) {
@@ -217,15 +214,11 @@ module.exports.Logistics = class {
                 } else {
                     var sources = this.getSources();
                     var spawn = Game.getObjectById(builder.memory.spawn);
-                    var targets = [spawn].concat(sources);
-                    var distances = _.map(targets, (target) => builder.pos.getRangeTo(target));
-                    var min = Math.min(...distances);
-                    var index = distances.indexOf(min);
-                    var target = targets[index];
+                    var target = utils.findMostClose([spawn].concat(sources), builder);
 
                     var result = 0;
 
-                    if (index == 0) {
+                    if (target.structureType == STRUCTURE_SPAWN) {
                         var result = builder.withdraw(target, RESOURCE_ENERGY);
                     } else {
                         var result = builder.harvest(target);
