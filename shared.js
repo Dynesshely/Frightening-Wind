@@ -25,6 +25,7 @@ module.exports.Room = class {
             () => this.sources,
             () => this.flags,
             () => this.tombstones,
+            () => this.extensions,
         );
 
         logger.log('    - Inited new room with `name`: ' + this.name);
@@ -35,6 +36,10 @@ module.exports.Room = class {
         this.flags = this.room.find(FIND_FLAGS);
         this.spawns = this.room.find(FIND_MY_SPAWNS);
         this.tombstones = this.room.find(FIND_TOMBSTONES);
+        this.structures = this.room.find(FIND_MY_STRUCTURES);
+        this.extensions = this.room.find(FIND_MY_STRUCTURES, {
+            filter: (structure) => structure.structureType == STRUCTURE_EXTENSION
+        });
     }
 
     dispatch() {

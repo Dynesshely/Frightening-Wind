@@ -6,13 +6,14 @@ const config = new configuration.Config();
 const dateTime = new Date();
 
 module.exports.Logistics = class {
-    constructor(controller, getSpawns, getCreeps, getSources, getFlags, getTombstones) {
+    constructor(controller, getSpawns, getCreeps, getSources, getFlags, getTombstones, getExtensions) {
         this.controller = controller;
         this.getSpawns = getSpawns;
         this.getCreeps = getCreeps;
         this.getSources = getSources;
         this.getFlags = getFlags;
         this.getTombstones = getTombstones;
+        this.getExtensions = getExtensions;
 
         this.sourcesWorkers = {};
 
@@ -76,6 +77,9 @@ module.exports.Logistics = class {
                     break;
                 case ERR_NOT_ENOUGH_ENERGY:
                     logger.log('            -     Energy not enough to generate');
+                    break;
+                case ERR_NAME_EXISTS:
+                    logger.log('            -     Name already exists: ' + name);
                     break;
                 default:
                     logger.log('            -     Generating failed with: ' + result);
@@ -141,14 +145,20 @@ module.exports.Logistics = class {
                     } else {
                         worker.say('🏠');
 
+                        var extensions = this.getExtensions();
                         var spawn = Game.getObjectById(worker.memory.spawn);
-                        var result = worker.transfer(spawn, RESOURCE_ENERGY);
+                        var targets = [spawn].concat(extensions);
+                        var distances = _.map(targets, (target) => worker.pos.getRangeTo(target));
+                        var min = Math.min(...distances);
+                        var index = distances.indexOf(min);
+                        var target = targets[index];
+                        var result = worker.transfer(target, RESOURCE_ENERGY);
 
                         switch (result) {
                             case OK:
                                 break;
                             case ERR_NOT_IN_RANGE:
-                                worker.moveTo(spawn);
+                                worker.moveTo(target);
                                 break;
                             case ERR_FULL:
                                 worker.memory.task = 'upgrade';
