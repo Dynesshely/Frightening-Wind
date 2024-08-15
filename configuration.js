@@ -1,5 +1,7 @@
 module.exports.Config = class {
   constructor() {
+    this.generableCreeps = ['worker', 'builder', 'occupier'];
+
     this.basicRoomCreepsCount = {
       'worker': 6,
       'builder': 6,
@@ -7,6 +9,7 @@ module.exports.Config = class {
       'soldier': 3,
       'shooter': 2,
       'doctor': 1,
+      'occupier': 1,
     };
 
     this.basicRoomCreepsBody = {
@@ -16,16 +19,18 @@ module.exports.Config = class {
       'soldier': [MOVE, ATTACK],
       'shooter': [MOVE, RANGED_ATTACK],
       'doctor': [MOVE, HEAL],
+      'occupier': [MOVE, CLAIM],
     };
 
     // If RCL > 4
     this.enhancedRoomCreepsBody = {
-      'worker': [MOVE, MOVE, MOVE, WORK, WORK, CARRY, CARRY],
+      'worker': [MOVE, MOVE, MOVE, WORK, WORK, WORK, CARRY, CARRY],
       'builder': [MOVE, MOVE, WORK, WORK, WORK, CARRY, CARRY],
       'miner': [MOVE, MOVE, WORK, WORK, WORK, CARRY, CARRY, CARRY],
       'soldier': [MOVE, MOVE, ATTACK, ATTACK, ATTACK],
       'shooter': [MOVE, MOVE, MOVE, RANGED_ATTACK, RANGED_ATTACK],
       'doctor': [MOVE, MOVE, MOVE, HEAL, HEAL, HEAL],
+      'occupier': [TOUGH, TOUGH, MOVE, MOVE, MOVE, CLAIM],
     };
 
     this.creepsMinRcl = {
@@ -35,6 +40,7 @@ module.exports.Config = class {
       'soldier': 5,
       'shooter': 5,
       'doctor': 5,
+      'occupier': 5,
     };
 
     this.minTtlToRecycle = 300;

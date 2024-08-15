@@ -1,4 +1,6 @@
 const logistics = require('logistics');
+const occupation = require('occupation');
+
 const logger = require('logger');
 
 module.exports.Room = class {
@@ -29,6 +31,9 @@ module.exports.Room = class {
             () => this.tombstones,
             () => this.structures,
             () => this.extensions,
+        );
+
+        this.occupation = new occupation.Occupation(
         );
     }
 

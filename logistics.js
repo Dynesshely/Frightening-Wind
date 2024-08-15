@@ -17,9 +17,6 @@ module.exports.Logistics = class {
 
         this.sourcesWorkers = {};
         this.sourcesWorkersLimitation = {};
-        this.config = {
-            basicRoomCreepsCount: config.basicRoomCreepsCount,
-        };
 
         this.initialize();
     }
@@ -40,7 +37,7 @@ module.exports.Logistics = class {
             maxWorkersCount += count;
         }
 
-        this.config.basicRoomCreepsCount['worker'] = maxWorkersCount;
+        config.basicRoomCreepsCount['worker'] = maxWorkersCount;
 
         logger.log('        -     Each source workers limitation details:');
         logger.log('        -         ' + JSON.stringify(this.sourcesWorkersLimitation));
@@ -55,10 +52,13 @@ module.exports.Logistics = class {
         var spawns = this.getSpawns();
         var creeps = this.getCreeps();
 
-        var base = this.config.basicRoomCreepsCount;
+        var base = config.basicRoomCreepsCount;
+
+        logger.log('            - You can generate `' + config.generableCreeps + '`');
 
         for (let key of Object.keys(base)) {
             if (this.controller.level < config.creepsMinRcl[key]) continue;
+            if (config.generableCreeps.indexOf(key) == -1) continue;
 
             var value = base[key];
             var count = this.queryCreeps(creeps, key).length;
@@ -273,7 +273,6 @@ module.exports.Logistics = class {
                     }
 
                     builder.say('🔨');
-
                     logger.log('            - Building structure `' + site.structureType + '` ' + site.pos);
 
                     builder.memory.task = 'building';
@@ -363,7 +362,7 @@ module.exports.Logistics = class {
         var creeps = this.getCreeps();
         var flags = this.getFlags();
 
-        var assigned = ['worker', 'builder'];
+        var assigned = ['worker', 'builder', 'occupier'];
 
         var notWorkers = _.filter(creeps, (creep) => assigned.indexOf(creep.memory.role) == -1);
         var bornFlag = _.filter(flags, (flag) => flag.name == 'Born')[0];
@@ -398,7 +397,7 @@ module.exports.Logistics = class {
 
             if (creep.memory.ttlTarget != undefined && creep.ticksToLive < creep.memory.ttlTarget) {
                 creep.say('😰');
-                logger.log('            - Renew creep `' + creep.name + '`');
+                logger.log('            - Renew creep `' + creep.name + '` ' + creep.pos);
 
                 var spawn = Game.getObjectById(creep.memory.spawn);
                 var result = spawn.renewCreep(creep);
