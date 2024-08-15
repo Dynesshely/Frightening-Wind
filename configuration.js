@@ -4,9 +4,9 @@ module.exports.Config = class {
       'worker': 6,
       'builder': 6,
       'miner': 3,
-      'soldier': 5,
-      'shooter': 3,
-      'doctor': 2,
+      'soldier': 3,
+      'shooter': 2,
+      'doctor': 1,
     };
 
     this.basicRoomCreepsBody = {
