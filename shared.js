@@ -72,8 +72,8 @@ module.exports.Room = class {
         this.logistics.cleanCreepsMemory();
 
 
-        logger.log('        - Recycle dying creeps');
+        logger.log('        - Renew dying creeps');
 
-        this.logistics.recycleCreeps();
+        this.logistics.renewCreeps();
     }
 };

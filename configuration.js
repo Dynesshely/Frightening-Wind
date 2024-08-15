@@ -38,6 +38,7 @@ module.exports.Config = class {
     };
 
     this.minTtlToRecycle = 300;
+    this.minTtlToRenew = 1000;
     this.minWallHits = 1000;
     this.minRampartsHits = 5000;
   }

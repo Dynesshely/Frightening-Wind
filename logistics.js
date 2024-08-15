@@ -387,17 +387,21 @@ module.exports.Logistics = class {
         }
     }
 
-    recycleCreeps() {
+    renewCreeps() {
         var creeps = this.getCreeps();
 
         for (let creep of creeps) {
             if (creep.ticksToLive < config.minTtlToRecycle) {
-                creep.say('😰');
+                if (creep.memory.ttlTarget == undefined)
+                    creep.memory.ttlTarget = config.minTtlToRenew;
+            }
 
-                logger.log('            - Recycling creep `' + creep.name + '`');
+            if (creep.memory.ttlTarget != undefined && creep.ticksToLive < creep.memory.ttlTarget) {
+                creep.say('😰');
+                logger.log('            - Renew creep `' + creep.name + '`');
 
                 var spawn = Game.getObjectById(creep.memory.spawn);
-                var result = spawn.recycleCreep(creep);
+                var result = spawn.renewCreep(creep);
 
                 switch (result) {
                     case OK:
@@ -406,6 +410,8 @@ module.exports.Logistics = class {
                         creep.moveTo(spawn);
                         break;
                 }
+            } else {
+                creep.memory.ttlTarget = undefined;
             }
         }
     }
