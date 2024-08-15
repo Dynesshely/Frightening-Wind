@@ -16,16 +16,34 @@ module.exports.Logistics = class {
         this.getExtensions = getExtensions;
 
         this.sourcesWorkers = {};
+        this.sourcesWorkersLimitation = {};
+        this.config = {
+            basicRoomCreepsCount: config.basicRoomCreepsCount,
+        };
 
         this.initialize();
     }
 
     initialize() {
+        logger.log('        - Init new logistics manager:');
+
         var sources = this.getSources();
 
         for (let source of this.getSources()) {
             this.sourcesWorkers[source.id] = [];
+            this.sourcesWorkersLimitation[source.id] = utils.getSourceWorkersLimitation(source);
         }
+
+        var maxWorkersCount = 0;
+
+        for (let count of Object.values(this.sourcesWorkersLimitation)) {
+            maxWorkersCount += count;
+        }
+
+        this.config.basicRoomCreepsCount['worker'] = maxWorkersCount;
+
+        logger.log('        -     Each source workers limitation details:');
+        logger.log('        -         ' + JSON.stringify(this.sourcesWorkersLimitation));
     }
 
     queryCreeps(creeps, type) {
@@ -37,7 +55,7 @@ module.exports.Logistics = class {
         var spawns = this.getSpawns();
         var creeps = this.getCreeps();
 
-        var base = config.basicRoomCreepsCount;
+        var base = this.config.basicRoomCreepsCount;
 
         for (let key of Object.keys(base)) {
             if (this.controller.level < config.creepsMinRcl[key]) continue;
@@ -101,6 +119,10 @@ module.exports.Logistics = class {
 
             if (workers.indexOf(name) != -1) {
                 return Game.getObjectById(id);
+            }
+
+            if (workers.length >= this.sourcesWorkersLimitation[id]) {
+                continue;
             }
 
             if (workers.length < minCount) {

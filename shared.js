@@ -9,6 +9,8 @@ module.exports.Room = class {
     }
 
     initialize() {
+        logger.log('    - Init new room with `name`: ' + this.name);
+
         this.room = Game.rooms[this.name];
         this.controller = this.room.controller;
 
@@ -28,8 +30,6 @@ module.exports.Room = class {
             () => this.structures,
             () => this.extensions,
         );
-
-        logger.log('    - Inited new room with `name`: ' + this.name);
     }
 
     update() {
