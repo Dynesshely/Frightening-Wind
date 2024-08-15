@@ -23,7 +23,7 @@ module.exports.Dispatcher = class {
         logger.log('+ Dispatching rooms');
 
         for (let room of this.myRooms) {
-            logger.log('    - Dispatching room with `name`: ' + room.name);
+            logger.log('    - Dispatching room ' + room.name);
 
             room.dispatch();
         }

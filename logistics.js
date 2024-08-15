@@ -6,12 +6,13 @@ const config = new configuration.Config();
 const dateTime = new Date();
 
 module.exports.Logistics = class {
-    constructor(controller, getSpawns, getCreeps, getSources, getFlags) {
+    constructor(controller, getSpawns, getCreeps, getSources, getFlags, getTombstones) {
         this.controller = controller;
         this.getSpawns = getSpawns;
         this.getCreeps = getCreeps;
         this.getSources = getSources;
         this.getFlags = getFlags;
+        this.getTombstones = getTombstones;
 
         this.sourcesWorkers = {};
 
@@ -39,7 +40,9 @@ module.exports.Logistics = class {
 
         for (let key of Object.keys(base)) {
             var value = base[key];
-            if (this.queryCreeps(creeps, key).length < value) {
+            var count = this.queryCreeps(creeps, key).length;
+            logger.log('            - Owning `' + key + '` creeps: ' + count + ' / ' + value);
+            if (count < value) {
                 logger.log('            - Generating creep `' + key + '`');
 
                 this.generateCreep(spawns, key);
@@ -48,44 +51,38 @@ module.exports.Logistics = class {
         }
     }
 
-    cleanCreepsMemory() {
-        var toRemove = [];
-        for (let creepName of Object.keys(Memory.creeps)) {
-            if (Object.keys(Game.creeps).indexOf(creepName) == -1) {
-                toRemove.push(creepName);
-            }
-        }
-        for (let name of toRemove) {
-            delete Memory.creeps[name];
-        }
-    }
-
     generateCreep(spawns, type) {
-        var name = 'creep-<type>-<time>'.replace('<type>', type).replace('<time>', dateTime.toISOString());
+        var name = '<spawn>-<type>-<time>'.replace('<type>', type).replace('<time>', dateTime.toISOString());
 
         for (let spawn of spawns) {
-            if (spawn.spawning == null) {
-                var body = config.basicRoomCreepsBody[type];
-                var result = spawn.spawnCreep(body, name);
+            if (spawn.spawning) continue;
 
-                switch (result) {
-                    case OK:
-                        logger.log('            -     Creep `' + name + '` generated');
+            name = name.replace('<spawn>', spawn.id);
 
-                        var creep = Game.creeps[name];
+            var body = config.basicRoomCreepsBody[type];
+            var result = spawn.spawnCreep(body, name);
 
-                        creep.memory.role = type;
-                        creep.memory.spawn = spawn.id;
-                        creep.memory.task = 'normal';
-                        break;
-                    case ERR_BUSY:
-                        break;
-                    case ERR_NOT_ENOUGH_ENERGY:
-                        break;
-                }
+            switch (result) {
+                case OK:
+                    logger.log('            -     Creep `' + name + '` generated');
 
-                return;
+                    var creep = Game.creeps[name];
+
+                    creep.memory.role = type;
+                    creep.memory.spawn = spawn.id;
+                    creep.memory.task = 'normal';
+                    break;
+                case ERR_BUSY:
+                    break;
+                case ERR_NOT_ENOUGH_ENERGY:
+                    logger.log('            -     Energy not enough to generate');
+                    break;
+                default:
+                    logger.log('            -     Generating failed with: ' + result);
+                    break;
             }
+
+            return;
         }
     }
 
@@ -129,6 +126,8 @@ module.exports.Logistics = class {
             switch (worker.memory.task) {
                 case 'normal':
                     if (worker.store.getFreeCapacity() > 0) {
+                        worker.say('🔄');
+
                         var source = this.querySource(worker.name);
                         var result = worker.harvest(source);
 
@@ -140,6 +139,8 @@ module.exports.Logistics = class {
                                 break;
                         }
                     } else {
+                        worker.say('🏠');
+
                         var spawn = Game.getObjectById(worker.memory.spawn);
                         var result = worker.transfer(spawn, RESOURCE_ENERGY);
 
@@ -159,6 +160,8 @@ module.exports.Logistics = class {
                     }
                     break;
                 case 'upgrade':
+                    worker.say('⚡');
+
                     var result = worker.upgradeController(this.controller);
 
                     switch (result) {
@@ -186,20 +189,68 @@ module.exports.Logistics = class {
 
         for (let builder of builders) {
             if (builder.store.getFreeCapacity() > 0) {
-                var spawn = Game.getObjectById(builder.memory.spawn);
-                var result = builder.withdraw(spawn, RESOURCE_ENERGY);
+                builder.say('🖐');
 
-                switch (result) {
-                    case OK:
-                        break;
-                    case ERR_NOT_IN_RANGE:
-                        builder.moveTo(spawn);
-                        break;
+                var tombstones = this.getTombstones();
+
+                if (tombstones.length > 0) {
+                    var tombstone = tombstones[0];
+                    var result = builder.withdraw(tombstone, RESOURCE_ENERGY);
+
+                    switch (result) {
+                        case OK:
+                            break;
+                        case ERR_NOT_IN_RANGE:
+                            builder.moveTo(tombstone);
+                            break;
+                    }
+                } else {
+                    var sources = this.getSources();
+                    var spawn = Game.getObjectById(builder.memory.spawn);
+                    var targets = [spawn].concat(sources);
+                    var distances = _.map(targets, (target) => builder.pos.getRangeTo(target));
+                    var min = Math.min(...distances);
+                    var index = distances.indexOf(min);
+                    var target = targets[index];
+
+                    var result = 0;
+
+                    if (index == 0) {
+                        var result = builder.withdraw(target, RESOURCE_ENERGY);
+                    } else {
+                        var result = builder.harvest(target);
+                    }
+
+                    switch (result) {
+                        case OK:
+                            break;
+                        case ERR_NOT_IN_RANGE:
+                            builder.moveTo(target);
+                            break;
+                    }
                 }
             } else {
                 var sites = this.controller.room.find(FIND_CONSTRUCTION_SITES);
                 if (sites.length > 0) {
                     var site = sites[0];
+
+                    var extensions = _.filter(sites, (site) => site.structureType == STRUCTURE_EXTENSION);
+
+                    if (extensions.length > 0) {
+                        var min = 1000000000;
+                        for (let extension of extensions) {
+                            var leftProgress = extension.progressTotal - extension.progress;
+                            if (leftProgress < min) {
+                                min = leftProgress;
+                                site = extension;
+                            }
+                        }
+                    }
+
+                    builder.say('🔨');
+
+                    logger.log('            - Building structure `' + site.structureType + '` ' + site.pos);
+
                     var result = builder.build(site);
 
                     switch (result) {
@@ -225,6 +276,43 @@ module.exports.Logistics = class {
 
         for (let creep of notWorkers) {
             var result = creep.moveTo(bornFlag);
+        }
+    }
+
+    cleanCreepsMemory() {
+        var toRemove = [];
+        for (let creepName of Object.keys(Memory.creeps)) {
+            if (Object.keys(Game.creeps).indexOf(creepName) == -1) {
+                toRemove.push(creepName);
+            }
+        }
+        for (let name of toRemove) {
+            delete Memory.creeps[name];
+
+            logger.log('            - Cleaned non-exist memory `' + name + '`');
+        }
+    }
+
+    recycleCreeps() {
+        var creeps = this.getCreeps();
+
+        for (let creep of creeps) {
+            if (creep.ticksToLive < config.minTtlToRecycle) {
+                creep.say('😰');
+
+                logger.log('            - Recycling creep `' + creep.name + '`');
+
+                var spawn = Game.getObjectById(creep.memory.spawn);
+                var result = spawn.recycleCreep(creep);
+
+                switch (result) {
+                    case OK:
+                        break;
+                    case ERR_NOT_IN_RANGE:
+                        creep.moveTo(spawn);
+                        break;
+                }
+            }
         }
     }
 };

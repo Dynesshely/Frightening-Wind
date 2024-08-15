@@ -17,6 +17,8 @@ module.exports.Config = class {
       'shooter': [MOVE, ATTACK, RANGED_ATTACK],
       'doctor': [MOVE, HEAL],
     };
+
+    this.minTtlToRecycle = 300;
   }
 };
 

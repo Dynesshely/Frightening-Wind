@@ -24,6 +24,7 @@ module.exports.Room = class {
             () => this.creeps,
             () => this.sources,
             () => this.flags,
+            () => this.tombstones,
         );
 
         logger.log('    - Inited new room with `name`: ' + this.name);
@@ -63,6 +64,11 @@ module.exports.Room = class {
         logger.log('        - Clean creeps memory');
 
         this.logistics.cleanCreepsMemory();
+
+
+        logger.log('        - Recycle dying creeps');
+
+        this.logistics.recycleCreeps();
     }
 };
 
