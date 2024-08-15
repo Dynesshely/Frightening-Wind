@@ -41,6 +41,8 @@ module.exports.Logistics = class {
         var base = config.basicRoomCreepsCount;
 
         for (let key of Object.keys(base)) {
+            if (this.controller.level < config.creepsMinRcl[key]) continue;
+
             var value = base[key];
             var count = this.queryCreeps(creeps, key).length;
             logger.log('            - Owning `' + key + '` creeps: ' + count + ' / ' + value);

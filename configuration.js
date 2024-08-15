@@ -18,6 +18,15 @@ module.exports.Config = class {
       'doctor': [MOVE, HEAL],
     };
 
+    this.creepsMinRcl = {
+      'worker': 0,
+      'builder': 0,
+      'miner': 6,
+      'soldier': 5,
+      'shooter': 5,
+      'doctor': 5,
+    };
+
     this.minTtlToRecycle = 300;
   }
 };
