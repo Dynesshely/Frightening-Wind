@@ -56,7 +56,7 @@ module.exports.Logistics = class {
     }
 
     generateCreep(spawns, type) {
-        var name = '<spawn>-<type>-<time>'.replace('<type>', type).replace('<time>', dateTime.toISOString());
+        var name = '<spawn>-<time>'.replace('<time>', Game.time);
 
         for (let spawn of spawns) {
             if (spawn.spawning) continue;
