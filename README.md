@@ -1,4 +1,4 @@
-﻿# Screeps AI Game Bot
+﻿# FW AI Game Bot
 
 Welcome to my Screeps AI bot project. This bot is designed to automate resource gathering, construction, and defense in the game Screeps World.
 
@@ -40,12 +40,12 @@ To install and set up the bot, follow these steps:
 1. Clone the repository:
 
    ```
-   git clone https://github.com/Dynesshely/MyScreeps.git
+   git clone https://github.com/Dynesshely/Frightening-Wind.git
    ```
 
 <!-- 2. Initialize the project:
    ```bash
-   cd MyScreeps
+   cd Frightening-Wind
    npm install
    ``` -->
 
