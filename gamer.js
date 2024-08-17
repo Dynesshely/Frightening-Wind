@@ -1,5 +1,4 @@
 ﻿const dispatcher = require('dispatcher');
-const logger = require('logger');
 
 module.exports.Gamer = class {
     constructor() {

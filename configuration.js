@@ -47,6 +47,7 @@ module.exports.Config = class {
     this.minTtlToRenew = 1000;
     this.minWallHits = 1000;
     this.minRampartsHits = 5000;
+    this.welcomeInterval = 10;
   }
 };
 
