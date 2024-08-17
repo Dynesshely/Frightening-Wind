@@ -6,10 +6,10 @@
     return target;
 };
 
-module.exports.getSourceWorkersLimitation = function (source) {
-    var center = source.pos;
+module.exports.getHarvestableLimitation = function (harvestable) {
+    var center = harvestable.pos;
 
-    var terrain = source.room.getTerrain();
+    var terrain = harvestable.room.getTerrain();
 
     var top = terrain.get(center.x, center.y - 1);
     var right = terrain.get(center.x + 1, center.y);
@@ -45,4 +45,65 @@ module.exports.getSourceWorkersLimitation = function (source) {
     }
 
     return 8 - count;
+};
+
+module.exports.initializeCreepsLimit = function (harvestables, harvestableCreeps, harvestableCreepsLimit, config, type) {
+    for (let harvestable of harvestables) {
+        harvestableCreeps[harvestable.id] = [];
+        harvestableCreepsLimit[harvestable.id] = this.getHarvestableLimitation(harvestable);
+    }
+
+    var maxWorkersCount = 0;
+
+    for (let count of Object.values(harvestableCreepsLimit)) {
+        maxWorkersCount += count;
+    }
+
+    config.basicRoomCreepsCount[type] = maxWorkersCount;
+};
+
+module.exports.queryCreeps = function (creeps, type) {
+    var filtered = _.filter(
+        creeps,
+        (creep) => {
+            if (creep.memory == undefined) return false;
+
+            return creep.memory.role == type;
+        }
+    );
+    return filtered;
+};
+
+module.exports.queryUsableHarvestable = function (name, harvestableCreeps, harvestableCreepsLimit) {
+    var minCount = 10000000;
+    var minHarvestable = '';
+
+    for (let id of Object.keys(harvestableCreeps)) {
+        var creeps = harvestableCreeps[id];
+
+        if (creeps.indexOf(name) != -1) {
+            if (Game.creeps[name] == undefined) {
+                delete creeps[creeps.indexOf(name)];
+            } else {
+                return Game.getObjectById(id);
+            }
+        }
+
+        if (creeps.length >= harvestableCreepsLimit[id]) {
+            continue;
+        }
+
+        if (creeps.length < minCount) {
+            minCount = creeps.length;
+            minHarvestable = id;
+        }
+    }
+
+    if (minHarvestable == '') {
+        return null;
+    }
+
+    harvestableCreeps[minHarvestable].push(name);
+
+    return Game.getObjectById(minHarvestable);
 };

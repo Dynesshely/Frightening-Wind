@@ -5,18 +5,31 @@ const utils = require('utils');
 const config = new configuration.Config();
 
 module.exports.Logistics = class {
-    constructor(controller, getSpawns, getCreeps, getSources, getFlags, getTombstones, getStructures, getExtensions) {
+    constructor(
+        controller,
+        getSpawns,
+        getCreeps,
+        getSources,
+        getMinerals,
+        getFlags,
+        getTombstones,
+        getStructures,
+        getExtensions
+    ) {
         this.controller = controller;
         this.getSpawns = getSpawns;
         this.getCreeps = getCreeps;
         this.getSources = getSources;
+        this.getMinerals = getMinerals;
         this.getFlags = getFlags;
         this.getTombstones = getTombstones;
         this.getStructures = getStructures;
         this.getExtensions = getExtensions;
 
         this.sourcesWorkers = {};
-        this.sourcesWorkersLimitation = {};
+        this.sourcesWorkersLimit = {};
+        this.mineralsMiners = {};
+        this.mineralsMinersLimit = {};
 
         this.initialize();
     }
@@ -24,28 +37,26 @@ module.exports.Logistics = class {
     initialize() {
         logger.log('        - Init new logistics manager:');
 
-        var sources = this.getSources();
+        utils.initializeCreepsLimit(
+            this.getSources(),
+            this.sourcesWorkers,
+            this.sourcesWorkersLimit,
+            config,
+            'worker'
+        );
 
-        for (let source of this.getSources()) {
-            this.sourcesWorkers[source.id] = [];
-            this.sourcesWorkersLimitation[source.id] = utils.getSourceWorkersLimitation(source);
-        }
-
-        var maxWorkersCount = 0;
-
-        for (let count of Object.values(this.sourcesWorkersLimitation)) {
-            maxWorkersCount += count;
-        }
-
-        config.basicRoomCreepsCount['worker'] = maxWorkersCount;
+        utils.initializeCreepsLimit(
+            this.getMinerals(),
+            this.mineralsMiners,
+            this.mineralsMinersLimit,
+            config,
+            'miner'
+        );
 
         logger.log('        -     Each source workers limitation details:');
-        logger.log('        -         ' + JSON.stringify(this.sourcesWorkersLimitation));
-    }
-
-    queryCreeps(creeps, type) {
-        var filtered = _.filter(creeps, (creep) => creep.memory.role == type);
-        return filtered;
+        logger.log('        -         ' + JSON.stringify(this.sourcesWorkersLimit));
+        logger.log('        -     Each mineral miners limitation details:');
+        logger.log('        -         ' + JSON.stringify(this.mineralsMinersLimit));
     }
 
     prepairCreeps() {
@@ -61,7 +72,7 @@ module.exports.Logistics = class {
             if (config.generableCreeps.indexOf(key) == -1) continue;
 
             var value = base[key];
-            var count = this.queryCreeps(creeps, key).length;
+            var count = utils.queryCreeps(creeps, key).length;
             logger.log('            - Owning `' + key + '` creeps: ' + count + ' / ' + value);
             if (count < value) {
                 logger.log('            - Generating creep `' + key + '`');
@@ -110,41 +121,8 @@ module.exports.Logistics = class {
         }
     }
 
-    querySource(name) {
-        var minCount = 10000;
-        var minSource = '';
-
-        for (let id of Object.keys(this.sourcesWorkers)) {
-            var workers = this.sourcesWorkers[id];
-
-            if (workers.indexOf(name) != -1) {
-                return Game.getObjectById(id);
-            }
-
-            if (workers.length >= this.sourcesWorkersLimitation[id]) {
-                continue;
-            }
-
-            if (workers.length < minCount) {
-                minCount = workers.length;
-                minSource = id;
-            }
-        }
-
-        if (minSource == '') {
-            return null;
-        }
-
-        logger.log('            - Assigning creep `' + name + '` to source `' + minSource + '`');
-
-        this.sourcesWorkers[minSource].push(name);
-
-        return Game.getObjectById(minSource);
-    }
-
     harvestSource() {
-        var creeps = this.getCreeps();
-        var workers = _.filter(creeps, (creep) => creep.memory.role == 'worker');
+        var workers = utils.queryCreeps(this.getCreeps(), 'worker');
 
         for (let worker of workers) {
             if (worker.memory.task == undefined) {
@@ -156,7 +134,11 @@ module.exports.Logistics = class {
                     if (worker.store.getFreeCapacity() > 0) {
                         worker.say('🔄');
 
-                        var source = this.querySource(worker.name);
+                        var source = utils.queryUsableHarvestable(
+                            worker.name,
+                            this.sourcesWorkers,
+                            this.sourcesWorkersLimit
+                        );
                         var result = worker.harvest(source);
 
                         switch (result) {
@@ -170,8 +152,11 @@ module.exports.Logistics = class {
                         worker.say('🏠');
 
                         var extensions = _.filter(this.getExtensions(), (ext) => ext.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || ext.store == undefined);
-                        var spawn = Game.getObjectById(worker.memory.spawn);
-                        var target = utils.findMostClose([spawn].concat(extensions), worker);
+                        var spawns = _.filter(this.getSpawns(), (spawn) => spawn.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+                        var spawn = worker.pos.findClosestByPath(FIND_MY_SPAWNS);
+                        if (spawn == null) spawn = Game.getObjectById(worker.memory.spawn);
+                        var targets = spawns.concat(extensions);
+                        var target = utils.findMostClose(targets, worker);
 
                         if (target == undefined) target = spawn;
 
@@ -184,7 +169,7 @@ module.exports.Logistics = class {
                                 worker.moveTo(target);
                                 break;
                             case ERR_FULL:
-                                if (extensions.length == 0)
+                                if (targets.length == 0)
                                     worker.memory.task = 'upgrade';
                                 break;
                             default:
@@ -213,13 +198,86 @@ module.exports.Logistics = class {
         }
     }
 
+    mine() {
+        var miners = utils.queryCreeps(this.getCreeps(), 'miner');
+
+        for (let miner of miners) {
+            if (miner.memory.task == undefined) {
+                miner.memory.task = 'normal';
+            }
+
+            switch (miner.memory.task) {
+                case 'normal':
+                    if (miner.store.getFreeCapacity() > 0) {
+                        miner.say('⛏');
+
+                        var mine = utils.queryUsableHarvestable(
+                            miner.name,
+                            this.mineralsMiners,
+                            this.mineralsMinersLimit
+                        );
+                        var result = miner.harvest(mine);
+
+                        switch (result) {
+                            case OK:
+                                break;
+                            case ERR_NOT_IN_RANGE:
+                                miner.moveTo(mine);
+                                break;
+                        }
+                    } else {
+                        miner.say('📦');
+
+                        var store = miner.store;
+                        var resourceTypes = Object.keys(store);
+                        var resourceType = resourceTypes[0];
+
+                        var storages = _.filter(
+                            this.getStructures(),
+                            (structure) => {
+                                var con1 = structure.structureType == STRUCTURE_STORAGE;
+                                if (con1 == false) return false;
+
+                                var con2 = false;
+                                for (let r of resourceTypes) {
+                                    var con = structure.store.getFreeCapacity(r) > 0;
+                                    con2 = con2 || con;
+                                    if (con) resourceType = r;
+                                }
+                                return con1 && con2;
+                            }
+                        );
+                        var target = utils.findMostClose(storages, miner);
+
+                        if (target == undefined) return;
+
+                        var result = miner.transfer(target, resourceType);
+
+                        switch (result) {
+                            case OK:
+                                break;
+                            case ERR_NOT_IN_RANGE:
+                                miner.moveTo(target);
+                                break;
+                            case ERR_FULL:
+                                break;
+                            default:
+                                logger.log('            - Unknown error: ' + result + ' & target detail: ' + JSON.stringify(target));
+                                break;
+                        }
+                    }
+                    break;
+            }
+        }
+    }
+
     buildStructures() {
         this.autoBuild();
     }
 
     autoBuild() {
         var creeps = this.getCreeps();
-        var builders = this.queryCreeps(creeps, 'builder');
+        var builders = utils.queryCreeps(creeps, 'builder');
 
         for (let builder of builders) {
             if (builder.store.getUsedCapacity() == 0) {
@@ -362,9 +420,7 @@ module.exports.Logistics = class {
         var creeps = this.getCreeps();
         var flags = this.getFlags();
 
-        var assigned = ['worker', 'builder', 'occupier'];
-
-        var notWorkers = _.filter(creeps, (creep) => assigned.indexOf(creep.memory.role) == -1);
+        var notWorkers = _.filter(creeps, (creep) => config.generableCreeps.indexOf(creep.memory.role) == -1);
         var bornFlag = _.filter(flags, (flag) => flag.name == 'Born')[0];
 
         for (let creep of notWorkers) {
@@ -427,7 +483,8 @@ module.exports.Logistics = class {
                 creep.say('😰');
                 logger.log('            - Renew creep `' + creep.name + '` (' + creep.ticksToLive + '/' + creep.memory.ttlTarget + ') ' + creep.pos);
 
-                var spawn = Game.getObjectById(creep.memory.spawn);
+                var spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+                if (spawn == null) spawn = Game.getObjectById(creep.memory.spawn);
                 var result = spawn.renewCreep(creep);
 
                 switch (result) {

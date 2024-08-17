@@ -1,6 +1,6 @@
 module.exports.Config = class {
   constructor() {
-    this.generableCreeps = ['worker', 'builder', 'occupier'];
+    this.generableCreeps = ['worker', 'builder', 'miner'];
 
     this.basicRoomCreepsCount = {
       'worker': 6,

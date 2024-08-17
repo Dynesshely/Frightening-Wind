@@ -27,6 +27,7 @@ module.exports.Room = class {
             () => this.spawns,
             () => this.creeps,
             () => this.sources,
+            () => this.minerals,
             () => this.flags,
             () => this.tombstones,
             () => this.structures,
@@ -60,6 +61,11 @@ module.exports.Room = class {
         logger.log('        - Harvest sources');
 
         this.logistics.harvestSource();
+
+
+        logger.log('        - Mine minerals');
+
+        this.logistics.mine();
 
 
         logger.log('        - Build structures');
