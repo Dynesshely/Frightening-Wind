@@ -1,4 +1,4 @@
-const dispatcher = require('dispatcher');
+const gamer = require('gamer');
 const logger = require('logger');
 
 logger.log('');
@@ -7,14 +7,10 @@ logger.log('| & Application Started ! |');
 logger.log('+-------------------------+');
 logger.log('');
 
-const mainDispatcher = new dispatcher.Dispatcher('W7N2');
-
-function main() {
-    mainDispatcher.dispatch();
-}
+const me = new gamer.Gamer();
 
 module.exports.loop = function () {
-    main();
+    me.dispatch();
 }
 
 
