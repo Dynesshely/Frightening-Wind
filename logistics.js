@@ -386,8 +386,36 @@ module.exports.Logistics = class {
         }
     }
 
+    recycleCreeps() {
+        var dyingOccupiers = _.filter(
+            this.getCreeps(),
+            (creep) => creep.memory.role == 'occupier' && creep.ticksToLive < config.minTtlToRecycle
+        );
+
+        for (let creep of dyingOccupiers) {
+            creep.say('😵');
+            logger.log('            - Recycle creep `' + creep.name + '` (' + creep.ticksToLive + ') ' + creep.pos);
+
+            var spawn = Game.getObjectById(creep.memory.spawn);
+            var result = spawn.recycleCreep(creep);
+
+            switch (result) {
+                case OK:
+                    break;
+                case ERR_NOT_IN_RANGE:
+                    creep.moveTo(spawn);
+                    break;
+                default:
+                    logger.log('            -     Unknown error: ' + result);
+                    break;
+            }
+        }
+    }
+
     renewCreeps() {
         var creeps = this.getCreeps();
+
+        creeps = _.filter(creeps, (creep) => creep.memory.role != 'occupier');
 
         for (let creep of creeps) {
             if (creep.ticksToLive < config.minTtlToRecycle) {
@@ -397,7 +425,7 @@ module.exports.Logistics = class {
 
             if (creep.memory.ttlTarget != undefined && creep.ticksToLive < creep.memory.ttlTarget) {
                 creep.say('😰');
-                logger.log('            - Renew creep `' + creep.name + '` ' + creep.pos);
+                logger.log('            - Renew creep `' + creep.name + '` (' + creep.ticksToLive + '/' + creep.memory.ttlTarget + ') ' + creep.pos);
 
                 var spawn = Game.getObjectById(creep.memory.spawn);
                 var result = spawn.renewCreep(creep);
@@ -407,6 +435,12 @@ module.exports.Logistics = class {
                         break;
                     case ERR_NOT_IN_RANGE:
                         creep.moveTo(spawn);
+                        break;
+                    case ERR_INVALID_TARGET:
+                        logger.log('            -     This creep may carried `CLAIM` body or target isn\'t creep');
+                        break;
+                    default:
+                        logger.log('            -     Unknown error: ' + result);
                         break;
                 }
             } else {
