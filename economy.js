@@ -79,7 +79,7 @@ function runRoom(room) {
     runLinks(room, data);         // RCL5+ 的 link 瞬移
 
     // 巡逻队规模（巡逻兵按扇区切分路线时要用）
-    const patrolCount = utils.countRole(data, 'patroller');
+    const patrolCount = utils.countRole(data, 'patroller') + utils.countRole(data, 'soldier');
     if (!Memory.fw) Memory.fw = {};
     Memory.fw.patrolSquad = Math.max(1, patrolCount);
 
@@ -1151,6 +1151,9 @@ function runSpawns(room, data) {
         }
         if (!target) return;
         memory.home = target;
+    } else if (role === 'soldier') {
+        // 士兵和巡逻兵共用扇区编号，保证覆盖不重叠
+        memory.sector = utils.countRole(data, 'patroller') + utils.countRole(data, 'soldier');
     } else if (role === 'patroller') {
         memory.sector = utils.countRole(data, 'patroller');
         memory.patrolIndex = memory.sector;
