@@ -11,8 +11,8 @@ module.exports = {
     reportInterval: 25,
 
     // 每个房间允许同时存在的工地数量上限（宁少勿多，让建造者集中火力）
-    maxSitesPerRoom: 4,
-    maxSitesPerRoomHighRcl: 5,
+    maxSitesPerRoom: 8,
+    maxSitesPerRoomHighRcl: 10,
     // 每 tick 最多新开工地数量
     maxNewSitesPerTick: 2,
 
@@ -34,10 +34,12 @@ module.exports = {
         hauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10 },
         builder: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 6 },
         upgrader: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
+        // 防御者：只堆 ATTACK + MOVE，房间里有敌人时才造
+        defender: { unit: ['attack', 'move'], filler: ['attack', 'move'], maxUnits: 5 },
     },
 
     // 生成优先级（同缺口比例时排在前的优先）
-    spawnPriority: ['miner', 'hauler', 'harvester', 'upgrader', 'builder'],
+    spawnPriority: ['defender', 'miner', 'hauler', 'harvester', 'upgrader', 'builder'],
 
     // 各等级扩展数量
     extensionLimit: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 },

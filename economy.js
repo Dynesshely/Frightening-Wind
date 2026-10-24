@@ -299,8 +299,8 @@ function planConstruction(room, data) {
         }
     }
 
-    // 6) 道路（RCL3+，把矿源和控制器连起来）
-    if (level >= 3 && created < config.maxNewSitesPerTick) {
+    // 6) 道路：只铺主要通勤路径上的沼泽段（平地本来就能满速走，铺路是浪费）
+    if (level >= 2 && created < config.maxNewSitesPerTick) {
         planRoads(room, data, occ, created);
     }
 }
@@ -331,29 +331,42 @@ function containerNear(data, pos, range) {
     return false;
 }
 
+/**
+ * 只给"主要通勤路径上的沼泽格"铺路：
+ * 平地上身体合格的 creep 本来就能 1 tick 走 1 格，铺路纯浪费 300 能量；
+ * 沼泽会让疲劳 ×5，铺一格路等于把那段路的时间砍到 1/3~1/5。
+ */
 function planRoads(room, data, occ, createdBudget) {
     const spawn = data.spawns[0];
     if (!spawn) return;
 
+    const maxRoadSites = 5;
+    let roadSites = 0;
+    for (const s of data.sites) if (s.structureType === STRUCTURE_ROAD) roadSites++;
+    if (roadSites >= maxRoadSites) return;
+
+    const terrain = room.getTerrain();
     const targets = [];
     for (const s of data.sources) targets.push(s.pos);
     if (room.controller) targets.push(room.controller.pos);
 
-    let roadSites = 0;
-    for (const s of data.sites) if (s.structureType === STRUCTURE_ROAD) roadSites++;
-    if (roadSites >= 3) return;
-
     for (const target of targets) {
-        const path = room.findPath(spawn.pos, target, { ignoreCreeps: true, range: 1 });
+        let path;
+        try {
+            path = room.findPath(spawn.pos, target, { ignoreCreeps: true, range: 1 });
+        } catch (e) {
+            continue;
+        }
         for (const step of path) {
-            if (roadSites >= 3) return;
-            if (createdBudget >= config.maxNewSitesPerTick) return;
+            if (roadSites >= maxRoadSites || createdBudget >= config.maxNewSitesPerTick) return;
             if (occ[step.x + ',' + step.y]) continue;
+            if (!(terrain.get(step.x, step.y) & TERRAIN_MASK_SWAMP)) continue;
             const r = room.createConstructionSite(step.x, step.y, STRUCTURE_ROAD);
             if (r === OK) {
                 occ[step.x + ',' + step.y] = true;
                 createdBudget++;
                 roadSites++;
+                console.log('[FW] ' + room.name + ' 沼泽铺路 @' + step.x + ',' + step.y);
             }
         }
     }
@@ -391,12 +404,19 @@ function computeQuota(room, data) {
     const perSource = capacity >= 800 ? 3 : 2;
     quota.harvester = bare * perSource;
 
-    // 搬运工：有容器才需要，按等级给 2~4 个
-    quota.hauler = containerized > 0 ? (level >= 5 ? 4 : (level >= 4 ? 3 : 2)) : 0;
+    // 搬运工：有容器才需要；能量上限低时先给 1 个（货源不足，多了只会闲置）
+    if (containerized > 0) {
+        quota.hauler = capacity < 550 ? 1 : (level >= 5 ? 4 : (level >= 4 ? 3 : 2));
+    }
 
     // 建造者：有工地才需要；工地多、能量上限高时多给
     if (data.sites.length > 0) {
         quota.builder = (data.sites.length >= 3 && capacity >= 800) ? 3 : 2;
+    }
+
+    // 防御者：房间里有敌人人时才造（1~3 个），经济单位打不了架
+    if (data.hostiles && data.hostiles.length > 0) {
+        quota.defender = Math.min(3, data.hostiles.length + 1);
     }
 
     // 升级者：只有容器/仓储体系搭起来后才值得专派（否则它自己跑矿源太浪费）
@@ -478,11 +498,13 @@ function runSpawns(room, data) {
     const free = data.spawns.filter(s => !s.spawning);
     if (!free.length) return;
 
-    // 总数上限：人太多会吃掉全部能量用于更新换代
-    if (data.creeplist.length >= creepCap(room)) return;
-
     const quota = computeQuota(room, data);
     const wanted = pickSpawnRole(data, quota);
+
+    // 总数上限：人太多会吃掉全部能量用于更新换代。
+    // 但防御者属于应急，允许突破上限（不然房间里有敌人时没人能打）
+    const urgentDefender = wanted.length > 0 && wanted[0] === 'defender';
+    if (!urgentDefender && data.creeplist.length >= creepCap(room)) return;
 
     if (!wanted.length) {
         // 配额已满但 spawn 满仓（能量没处花）：多造一个采集者换产能，上限见 cap

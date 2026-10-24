@@ -379,10 +379,14 @@ function buildSomething(creep, data) {
     let bestDist = 999;
     let bestPri = 99;
     // 先按结构类型优先级，再按距离
+    // 评分 = 类型优先级 * 8 + 距离：优先级仍然重要，但不会为了优先级跑 30 格
+    let bestScore = Infinity;
     for (const s of data.sites) {
         const pri = sitePriority(s, data);
         const d = creep.pos.getRangeTo(s);
-        if (pri < bestPri || (pri === bestPri && d < bestDist)) {
+        const score = pri * 8 + d;
+        if (score < bestScore) {
+            bestScore = score;
             bestPri = pri;
             bestDist = d;
             best = s;
@@ -392,7 +396,7 @@ function buildSomething(creep, data) {
     say(creep, '🔨');
     const r = creep.build(best);
     if (r === ERR_NOT_IN_RANGE) moveTo(creep, best);
-    else if (r === OK) creep.memory.task = 'building';
+    else if (r === OK) { creep.memory.task = 'building'; bump('build'); }
     return true;
 }
 

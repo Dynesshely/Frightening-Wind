@@ -140,15 +140,49 @@ function upgrader(creep, data) {
         utils.harvestSource(creep, data);
         return;
     }
-    // 没有容器体系时（RCL1）先补 spawn/扩展，别让 spawn 干等
+    // 满载：升级就是它的工作，直接升级（别再走回去把能量倒给 spawn）
+    if (utils.upgradeController(creep, data.room)) return;
+    // 控制器不可用（没视野/不是我的）才退回补给与建造
     if (utils.deliverEnergy(creep, data)) return;
-    if (utils.buildSomething(creep, data)) return;
-    utils.upgradeController(creep, data.room);
+    utils.buildSomething(creep, data);
+}
+
+/* ------------------------------ 防御者 ------------------------------ */
+
+function defender(creep, data) {
+    if (!data.hostiles || !data.hostiles.length) {
+        // 没敌人：常备军保留 1 个，其余在 spawn 附近待命一段时间后回收
+        const defenders = data.creeplist.filter(c => c.memory && c.memory.role === 'defender').length;
+        creep.memory.noEnemySince = creep.memory.noEnemySince || Game.time;
+        if (defenders > 1 && Game.time - creep.memory.noEnemySince > 150) {
+            const spawn = data.spawns[0];
+            if (spawn) {
+                if (creep.pos.getRangeTo(spawn) > 1) {
+                    utils.moveTo(creep, spawn);
+                } else {
+                    const r = spawn.recycleCreep(creep);
+                    if (r === OK) console.log('[FW] 回收闲置防御者 ' + creep.name);
+                }
+            }
+        } else {
+            const spawn = data.spawns[0];
+            if (spawn && creep.pos.getRangeTo(spawn) > 3) utils.moveTo(creep, spawn, { range: 3 });
+        }
+        return;
+    }
+
+    creep.memory.noEnemySince = undefined;
+    const target = creep.pos.findClosestByRange(data.hostiles);
+    if (!target) return;
+    utils.say(creep, '⚔');
+    const r = creep.attack(target);
+    if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target);
 }
 
 /* ------------------------------ 分发 ------------------------------ */
 
 const BEHAVIORS = {
+    defender: defender,
     harvester: harvester,
     miner: miner,
     hauler: hauler,
