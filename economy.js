@@ -54,6 +54,11 @@ function runRoom(room) {
     defense.run(room, data);      // 塔 / 安全模式 / 逃跑 / 防御工事
     runLinks(room, data);         // RCL5+ 的 link 瞬移
 
+    // 巡逻队规模（巡逻兵按扇区切分路线时要用）
+    const patrolCount = utils.countRole(data, 'patroller');
+    if (!Memory.fw) Memory.fw = {};
+    Memory.fw.patrolSquad = Math.max(1, patrolCount);
+
     // 记录最近一次敌人的方位（塔防选址按"来敌方向"布防）
     if (data.hostiles && data.hostiles.length > 0) {
         let nearest = data.hostiles[0];
@@ -744,7 +749,8 @@ function computeQuota(room, data) {
             : 1;
         // 边防巡逻队：RCL3 起常备 2 人，在相邻房间之间来回巡逻清野；受袭时加到 3
         if (level >= 3) {
-            const patrolBase = capacity >= 700 ? 2 : 1;
+            // 目标：边境一半以上的房间时刻有人巡逻
+            const patrolBase = capacity >= 800 ? 3 : 2;
             quota.patroller = (data.hostiles && data.hostiles.length > 0) ? patrolBase + 1 : patrolBase;
         }
         // 侦查兵：相邻房间情报缺失/过期时才派 1 个
@@ -778,8 +784,8 @@ function computeQuota(room, data) {
 
     // 远程采矿：只有"本地已经饱和"才派——两个矿源都有容器、没工地、RCL3+、人数够
     quota.remoteHarvester = 0;
-    if (level >= 4 && containerized >= 2 && data.creeplist.length >= 12) {
-        quota.remoteHarvester = 2;
+    if (level >= 3 && containerized >= 2 && (utils.countRole(data, 'miner') >= 2)) {
+        quota.remoteHarvester = capacity >= 1300 ? 3 : 2;
     }
 
     // 总人数上限：按"先砍谁最不痛"的顺序裁剪，保证矿工/建造者/升级者都还留得住人
@@ -872,15 +878,26 @@ function pickReserveTarget(room) {
 /**
  * 挑一个可以远程采矿的相邻房间（无主、没敌人、有矿源）
  */
-function pickRemoteTarget(room, data) {
+/**
+ * 挑一个可以远程采矿的相邻房间。skip=已占用的目标数，用来把多个远程采集者摊到不同房间。
+ * 优先"无主 + 没敌人 + 矿源多"的房间。
+ */
+function pickRemoteTarget(room, data, skip) {
     const cands = utils.expansionCandidates(room.name);
+    const usable = [];
     for (const c of cands) {
         const info = utils.getIntel(c.room);
         if (!info || !info.sources || !info.sources.length) continue;
         if (info.hostiles > 0) continue;
-        return { room: c.room, sourceId: info.sources[0].id };
+        usable.push({ room: c.room, sources: info.sources, mineral: info.mineral });
     }
-    return null;
+    if (!usable.length) return null;
+    usable.sort((a, b) => b.sources.length - a.sources.length);
+    const idx = (skip || 0) % usable.length;
+    const pick = usable[idx];
+    // 同一个房间有多个矿源时，按索引换一个矿源
+    const src = pick.sources[((skip || 0) / usable.length | 0) % pick.sources.length];
+    return { room: pick.room, sourceId: src ? src.id : undefined };
 }
 
 /**
@@ -904,7 +921,7 @@ function hasStaleNeighbor(roomName) {
 }
 
 function creepCap(room) {
-    return 7 + Math.floor((room.energyCapacityAvailable || 300) / 100);
+    return 8 + Math.floor((room.energyCapacityAvailable || 300) / 100);
 }
 
 function runSpawns(room, data) {
@@ -956,12 +973,15 @@ function runSpawns(room, data) {
     } else if (role === 'miner') {
         const source = assignSource(room, data, true);
         if (source) memory.sourceId = source.id;
+    } else if (role === 'patroller') {
+        memory.sector = utils.countRole(data, 'patroller');
+        memory.patrolIndex = memory.sector;
     } else if (role === 'reserver') {
         const target = pickReserveTarget(room);
         if (!target) return;
         memory.targetRoom = target;
     } else if (role === 'remoteHarvester') {
-        const target = pickRemoteTarget(room, data);
+        const target = pickRemoteTarget(room, data, utils.countRole(data, 'remoteHarvester'));
         if (!target) return;   // 没有合适目标就不造
         memory.targetRoom = target.room;
         if (target.sourceId) memory.sourceId = target.sourceId;

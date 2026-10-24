@@ -429,7 +429,14 @@ function patroller(creep, data) {
         }
     }
 
-    const route = patrolRoute(home);
+    let route = patrolRoute(home);
+    // 分扇区：每个巡逻兵只负责自己那几段边境，保证同一时刻边境有一半以上房间有人
+    if (route.length > 1) {
+        const squad = Math.max(1, Math.min(route.length, Memory.fw && Memory.fw.patrolSquad || 2));
+        const sector = (creep.memory.sector || 0) % squad;
+        const mine = route.filter((r, i) => i % squad === sector);
+        if (mine.length) route = mine;
+    }
     if (!route.length) {
         // 没有相邻房间可巡逻：在老家门口待命
         if (data.spawns[0] && creep.pos.getRangeTo(data.spawns[0]) > 3) {
