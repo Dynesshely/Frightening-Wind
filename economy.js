@@ -578,7 +578,8 @@ function computeQuota(room, data) {
             : 1;
         // 边防巡逻队：RCL3 起常备 2 人，在相邻房间之间来回巡逻清野；受袭时加到 3
         if (level >= 3) {
-            quota.patroller = (data.hostiles && data.hostiles.length > 0) ? 3 : 2;
+            const patrolBase = capacity >= 700 ? 2 : 1;
+            quota.patroller = (data.hostiles && data.hostiles.length > 0) ? patrolBase + 1 : patrolBase;
         }
         // 侦查兵：相邻房间情报缺失/过期时才派 1 个
         quota.scout = hasStaleNeighbor(room.name) ? config.maxScouts : 0;
@@ -591,7 +592,7 @@ function computeQuota(room, data) {
     // 占领者：RCL3+ 就派（650 能量的 CLAIM 单位，相对 16 E/tick 的收入只是 3%）。
     // 服务器上有其他玩家/机器人在活动，先把相邻的优质空地"预定"住比省这 650 更划算。
     quota.reserver = 0;
-    if (level >= 3 && (data.creepsByRole.reserver || 0) === 0) {
+    if (level >= 3 && capacity >= 650 && (data.creepsByRole.reserver || 0) === 0) {
         const target = pickReserveTarget(room);
         if (target) quota.reserver = 1;
     }
@@ -611,7 +612,7 @@ function computeQuota(room, data) {
 
     // 远程采矿：只有"本地已经饱和"才派——两个矿源都有容器、没工地、RCL3+、人数够
     quota.remoteHarvester = 0;
-    if (level >= 3 && containerized >= 2 && data.creeplist.length >= 9) {
+    if (level >= 4 && containerized >= 2 && data.creeplist.length >= 12) {
         quota.remoteHarvester = 2;
     }
 
@@ -621,12 +622,17 @@ function computeQuota(room, data) {
         + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0)
         + (quota.remoteHarvester || 0) + (quota.reserver || 0);
     const floors = {
-        harvester: 2,
+        // 增长引擎保底：矿工不砍、升级者/建造者各留 2、搬运 1、守卫各 1
+        miner: quota.miner || 0,
+        harvester: Math.min(2, quota.harvester || 0),
+        upgrader: Math.min(2, quota.upgrader || 0),
+        builder: data.sites.length > 0 ? Math.min(2, quota.builder || 0) : 0,
         hauler: 1,
-        builder: data.sites.length > 0 ? 1 : 0,
-        upgrader: 1,
+        soldier: 1,
+        patroller: 1,
     };
-    const trimOrder = ['harvester', 'hauler', 'builder', 'upgrader'];
+    // 裁剪顺序：先砍外围（远程/占领/侦查），最后才动经济核心
+    const trimOrder = ['remoteHarvester', 'reserver', 'scout', 'patroller', 'hauler', 'harvester', 'builder', 'upgrader'];
     while (total > cap) {
         let trimmed = false;
         for (const role of trimOrder) {
