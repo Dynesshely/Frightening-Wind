@@ -87,6 +87,32 @@ function runRoom(room) {
  * 不用等它们老死（否则容器建好后要空转上千 tick 才有人去用）。
  */
 /**
+ * 回收超编单位：转职转不动（身体不合适）时，把"明显超编 + 还能活很久"的单位
+ * 送回 spawn 回收，名额让给缺人的岗位。回收返还 50% 身体能量。
+ */
+function recycleSurplus(room, data, quota, deficits) {
+    const have = n => utils.countRole(data, n);
+    for (const d of deficits) {
+        if (have(d.role) >= (quota[d.role] || 0)) continue;
+        for (const creep of data.creeplist) {
+            if (have(d.role) >= (quota[d.role] || 0)) break;
+            const cur = creep.memory && creep.memory.role;
+            if (!cur || cur === d.role) continue;
+            const want = quota[cur] || 0;
+            // 至少超编 2 个，且还能活 400 tick 以上（快死的等它自己死）
+            if (have(cur) <= want + 1) continue;
+            if ((creep.ticksToLive || 1500) < 400) continue;
+            if (cur === 'soldier' || cur === 'patroller') continue;   // 守卫不回收
+            creep.memory.recycle = true;
+            console.log('[FW] ' + creep.name + ' 超编(' + cur + ' ' + have(cur) + '/' + want + ')，回收换名额给 ' + d.role);
+            if (data.ownedByRole) data.ownedByRole[cur] = Math.max(0, (data.ownedByRole[cur] || 0) - 1);
+            data.creepsByRole[cur] = Math.max(0, (data.creepsByRole[cur] || 0) - 1);
+            break;
+        }
+    }
+}
+
+/**
  * 身体能否胜任某个角色
  */
 function canDo(creep, role) {
@@ -139,6 +165,7 @@ function rebalanceRoles(room, data) {
     }
     if (!deficits.length) return;
     deficits.sort((a, b) => a.ratio - b.ratio);
+    recycleSurplus(room, data, quota, deficits);
 
     const containerSources = data.sources.filter(s => sourceHasContainer(data, s));
 
@@ -171,6 +198,7 @@ function rebalanceRoles(room, data) {
             creep.memory.role = d.role;
             creep.memory.working = undefined;
             creep.memory.noEnemySince = undefined;
+            creep.memory.recycle = undefined;
             if (data.ownedByRole) {
                 data.ownedByRole[cur] = Math.max(0, (data.ownedByRole[cur] || 0) - 1);
                 data.ownedByRole[d.role] = (data.ownedByRole[d.role] || 0) + 1;
@@ -627,7 +655,7 @@ function computeQuota(room, data) {
         harvester: Math.min(2, quota.harvester || 0),
         upgrader: Math.min(2, quota.upgrader || 0),
         builder: data.sites.length > 0 ? Math.min(2, quota.builder || 0) : 0,
-        hauler: 1,
+        hauler: Math.min(2, quota.hauler || 0),
         soldier: 1,
         patroller: 1,
     };

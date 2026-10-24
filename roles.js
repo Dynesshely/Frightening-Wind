@@ -548,6 +548,20 @@ const BEHAVIORS = {
 function run(creep) {
     if (creep.spawning) return;
 
+    // 待回收：回 spawn 换能量，把名额让给紧缺岗位
+    if (creep.memory && creep.memory.recycle) {
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS) || Game.spawns[Object.keys(Game.spawns)[0]];
+        if (!spawn) { creep.memory.recycle = undefined; return; }
+        if (creep.pos.getRangeTo(spawn) <= 1) {
+            const r = spawn.recycleCreep(creep);
+            if (r === OK) console.log('[FW] 已回收 ' + creep.name);
+            else if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, spawn);
+            return;
+        }
+        utils.moveTo(creep, spawn);
+        return;
+    }
+
     if (!creep.memory) creep.memory = {};
     if (!creep.memory.role || !BEHAVIORS[creep.memory.role]) {
         creep.memory.role = utils.inferRole(creep);
