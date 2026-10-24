@@ -798,7 +798,9 @@ function computeQuota(room, data) {
         miner: quota.miner || 0,
         harvester: Math.min(2, quota.harvester || 0),
         upgrader: Math.min(2, quota.upgrader || 0),
-        builder: data.sites.length > 0 ? Math.min(2, quota.builder || 0) : 0,
+        builder: data.sites.length > 0
+            ? Math.min(data.sites.length >= 4 ? 3 : 2, quota.builder || 0)
+            : 0,
         hauler: Math.min(2, quota.hauler || 0),
         soldier: 1,
         patroller: 1,
