@@ -274,6 +274,48 @@ function reserver(creep, data) {
     }
 }
 
+/* ------------------------------ 占房者 ------------------------------ */
+
+function claimer(creep, data) {
+    const target = creep.memory.targetRoom;
+    const home = creep.memory.home || creep.room.name;
+    if (!target) {
+        if (creep.room.name !== home) utils.moveToRoom(creep, home);
+        return;
+    }
+    if (creep.room.name !== target) {
+        utils.say(creep, '➡');
+        utils.moveToRoom(creep, target);
+        return;
+    }
+    const ctrl = creep.room.controller;
+    if (!ctrl) return;
+    if (ctrl.my) {
+        // 已经拿下了：记录情报，回家（后续交给开拓者）
+        utils.recordIntel(creep.room);
+        console.log('[FW] 占领成功: ' + target);
+        creep.memory.targetRoom = undefined;
+        utils.moveToRoom(creep, home);
+        return;
+    }
+    if (ctrl.owner) {
+        console.log('[FW] 放弃目标（已被占）: ' + target);
+        creep.memory.targetRoom = undefined;
+        utils.moveToRoom(creep, home);
+        return;
+    }
+    utils.say(creep, '🚩');
+    const r = creep.claimController(ctrl);
+    if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, { range: 1 });
+    else if (r === OK) { console.log('[FW] 已占领 ' + target); utils.recordIntel(creep.room); }
+    else if (r === ERR_GCL_NOT_ENOUGH) {
+        console.log('[FW] GCL 不足，暂时占不了 ' + target);
+        Memory.fw.gclBlocked = Game.time;
+        creep.memory.targetRoom = undefined;
+        if (creep.room.name !== home) utils.moveToRoom(creep, home);
+    }
+}
+
 /* ------------------------------ 士兵 ------------------------------ */
 
 function soldier(creep, data) {
@@ -321,6 +363,140 @@ function soldier(creep, data) {
         return;
     }
     if (creep.pos.getRangeTo(spawn) > 3) utils.moveTo(creep, spawn, { range: 3 });
+}
+
+/* ------------------------------ 开拓者（新房间建设） ------------------------------ */
+
+/**
+ * 开拓者：在家里的 spawn 孵化，但 memory.home 指向"待开发的新房间"。
+ * 到地方后：先建 spawn 工地 -> 再把控制器升到 RCL1 -> 之后采能维持。
+ */
+function pioneer(creep, data) {
+    const target = creep.memory.home;
+    if (!target) return;
+    if (creep.room.name !== target) {
+        utils.say(creep, '➡');
+        utils.moveToRoom(creep, target);
+        return;
+    }
+
+    const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+    if (sites.length) {
+        if (utils.isWorking(creep)) {
+            if (utils.buildSomething(creep, data)) return;
+        }
+        // 没能量：就近采/取
+        if (utils.withdrawEnergy(creep, data)) return;
+        utils.harvestSource(creep, data);
+        return;
+    }
+
+    const ctrl = creep.room.controller;
+    if (ctrl && ctrl.my && ctrl.level < 1) {
+        if (utils.isWorking(creep)) {
+            utils.say(creep, '⚡');
+            if (ctrl && creep.upgradeController(ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, { range: 3 });
+            return;
+        }
+        if (utils.withdrawEnergy(creep, data)) return;
+        utils.harvestSource(creep, data);
+        return;
+    }
+
+    // spawn 已经起来了：就地当普通工人
+    if (!utils.isWorking(creep)) {
+        if (utils.withdrawEnergy(creep, data)) return;
+        utils.harvestSource(creep, data);
+        return;
+    }
+    if (utils.buildSomething(creep, data)) return;
+    if (utils.deliverEnergy(creep, data)) return;
+    utils.upgradeController(creep, creep.room);
+}
+
+/* ------------------------------ 侦察兵（敌区情报） ------------------------------ */
+
+/**
+ * 侦察兵：专门去"可能有敌人/别人的房间"拿情报。
+ * 原则只有一条：信息到手立刻走人——进入房间当 tick 就记录情报，最多停 reconStayTicks 就转向下一个目标。
+ */
+function recon(creep, data) {
+    const home = creep.memory.home || creep.room.name;
+    const stay = config.reconStayTicks;
+
+    // 到了目标房间：记录情报 -> 立刻离开
+    const target = creep.memory.reconTarget;
+    if (target && creep.room.name === target) {
+        utils.recordIntel(creep.room);
+        creep.memory.reconTarget = undefined;
+        creep.memory.reconSince = Game.time;
+        utils.say(creep, '🔍');
+        // 立刻往房间外侧/老家方向撤
+        creep.memory.reconBack = true;
+        return;
+    }
+
+    // 撤离中：先离开这个房间（回老家或去下一个目标）
+    if (creep.memory.reconBack) {
+        const next = pickReconTarget(home);
+        if (next && next !== creep.room.name) {
+            creep.memory.reconBack = undefined;
+            creep.memory.reconTarget = next;
+            utils.say(creep, '➡');
+            utils.moveToRoom(creep, next);
+            return;
+        }
+        if (creep.room.name !== home) {
+            utils.say(creep, '🏠');
+            utils.moveToRoom(creep, home);
+            creep.memory.reconBack = undefined;
+            return;
+        }
+        creep.memory.reconBack = undefined;
+        creep.memory.reconTarget = undefined;
+        utils.say(creep, '💤');
+        return;
+    }
+
+    const next = pickReconTarget(home);
+    if (!next) {
+        // 没有值得侦察的目标：回老家待命
+        if (creep.room.name !== home) utils.moveToRoom(creep, home);
+        else utils.say(creep, '💤');
+        return;
+    }
+    creep.memory.reconTarget = next;
+    utils.say(creep, '➡');
+    utils.moveToRoom(creep, next);
+}
+
+/**
+ * 侦察目标：相邻房间里"情报过期 + 危险/有主"的那些（纯 scout 只管无主房间，recon 专啃硬骨头）
+ */
+function pickReconTarget(homeName) {
+    if (!homeName) return null;
+    let exits = {};
+    try {
+        exits = Game.map.describeExits(homeName) || {};
+    } catch (e) {
+        return null;
+    }
+    let best = null;
+    for (const dir in exits) {
+        const name = exits[dir];
+        if (!name || name === homeName) continue;
+        const info = utils.getIntel(name);
+        const age = info ? (Game.time - info.t) : 9999999;
+        if (age < config.reconStaleTicks) continue;
+        // 危险房间优先（有主 / 见过敌人），这样才值得派侦察兵
+        let score = age / 1000;
+        if (info) {
+            if (info.controller && info.controller.owner) score += 5;
+            if (info.hostiles > 0) score += 5;
+        }
+        if (!best || score > best.score) best = { name: name, score: score };
+    }
+    return best ? best.name : null;
 }
 
 /* ------------------------------ 边防巡逻队 ------------------------------ */
@@ -560,6 +736,9 @@ const BEHAVIORS = {
     soldier: soldier,
     patroller: patroller,
     scout: scout,
+    recon: recon,
+    pioneer: pioneer,
+    claimer: claimer,
     reserver: reserver,
     harvester: harvester,
     remoteHarvester: remoteHarvester,
@@ -596,4 +775,4 @@ function run(creep) {
     fn(creep, data);
 }
 
-module.exports = { run, pickScoutTarget, patrolRoute };
+module.exports = { run, pickScoutTarget, pickReconTarget, patrolRoute };

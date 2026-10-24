@@ -38,16 +38,22 @@ module.exports = {
         remoteHarvester: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 5 },
         // 占领者：CLAIM + MOVE，去相邻房间预定控制器（CLAIM 600 能量，所以只造 1 个）
         reserver: { unit: ['claim', 'move'], filler: [], maxUnits: 1, maxCost: 650 },
+        // 占领者（真正占房）：同样是 CLAIM + MOVE，但执行 claimController
+        claimer: { unit: ['claim', 'move'], filler: [], maxUnits: 1, maxCost: 650 },
         // 巡逻兵：ATTACK + MOVE，常备边防（RCL3 起 2 人，受袭时加到 3）
         patroller: { unit: ['attack', 'move'], filler: [], maxUnits: 3, maxCost: 400 },
         // 士兵：只堆 ATTACK + MOVE，有敌情时才造
         soldier: { unit: ['attack', 'move'], filler: ['attack', 'move'], maxUnits: 8, maxCost: 300 },
-        // 侦查兵：纯 MOVE，50 能量一个，跑得快、活得久
+        // 侦查兵：纯 MOVE，50 能量一个，跑得快、活得久（只去安全/无主房间）
         scout: { unit: ['move'], filler: [], maxUnits: 4, maxCost: 100 },
+        // 侦察兵：进敌对/危险房间拿情报，2~3 个 MOVE，进得去跑得掉
+        recon: { unit: ['move'], filler: [], maxUnits: 3, maxCost: 150 },
+        // 开拓者：去新占房间建 spawn / 升控制器
+        pioneer: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 5 },
     },
 
     // 生成优先级（同缺口比例时排在前的优先）
-    spawnPriority: ['soldier', 'patroller', 'scout', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
+    spawnPriority: ['claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
 
     // 侦查：房间情报多少 tick 后视为过期
     intelStaleTicks: 2000,
@@ -56,8 +62,13 @@ module.exports = {
     // 提前替代：creep 剩余 TTL 低于该值就开始补位（避免岗位真空）
     replaceTtl: 120,
 
+    // 侦察：进危险房间后最多停留多少 tick（信息一拿到就走）
+    reconStayTicks: 3,
+    // 侦察情报多久算过期
+    reconStaleTicks: 1500,
+
     // 边防巡逻
-    patrolRooms: 4,          // 巡逻路线最多几个房间
+    patrolRooms: 4,          // 巡逻路线最多几个房间（相邻房间最多也就 4 个）
     patrolStayTicks: 40,     // 每个房间驻留多少个 tick 扫荡
     patrolHealRatio: 0.45,   // 血量低于该比例就回老家（塔下面）治疗
 

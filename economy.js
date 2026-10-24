@@ -47,10 +47,34 @@ function ownedRooms() {
     return rooms;
 }
 
+/**
+ * Spawn 业务命名：引擎给 spawn 自动起名（Spawn1/Spawn2...），
+ * 这里给每个 spawn 贴一个稳定的业务标签，供日志与调度使用。
+ * 规则：主基地第一个 spawn = Root；其余 = FW-<房间名>（同房多个再加 -2/-3）
+ */
+function tagSpawns(rooms) {
+    if (!Memory.fw) Memory.fw = {};
+    if (!Memory.fw.spawnTags) Memory.fw.spawnTags = {};
+    const tags = Memory.fw.spawnTags;
+    for (const room of rooms) {
+        const spawns = room.spawns && room.spawns.length ? room.spawns : room.find(FIND_MY_SPAWNS);
+        if (!spawns || !spawns.length) continue;
+        let n = 0;
+        for (const spawn of spawns) {
+            n++;
+            if (tags[spawn.id]) continue;
+            if (spawn.name === 'Root') { tags[spawn.id] = 'Root'; continue; }
+            tags[spawn.id] = 'FW-' + room.name + (n > 1 ? '-' + n : '');
+            console.log('[FW] 新 spawn 贴标: ' + spawn.name + ' -> ' + tags[spawn.id]);
+        }
+    }
+}
+
 /* ------------------------------ 房间主流程 ------------------------------ */
 
 function runRoom(room) {
     const data = utils.roomData(room);
+    tagSpawns([room]);
     defense.run(room, data);      // 塔 / 安全模式 / 逃跑 / 防御工事
     runLinks(room, data);         // RCL5+ 的 link 瞬移
 
@@ -340,6 +364,15 @@ function planConstruction(room, data) {
     }
     if (room.controller) {
         for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) avoid.push({ x: room.controller.pos.x + dx, y: room.controller.pos.y + dy });
+    }
+
+    // 0) 新占房间引导：没有 spawn 也没有 spawn 工地时，先在控制器附近起一个
+    if (data.spawns.length === 0 && countSites(data, STRUCTURE_SPAWN) === 0 && level >= 1) {
+        const spots = freeSpots(room, occ, center.x, center.y, 2, 6, []);
+        if (spots.length && createSite(room, spots[0], STRUCTURE_SPAWN, 'bootstrap')) {
+            occ[spots[0].x + ',' + spots[0].y] = true;
+            created++;
+        }
     }
 
     // 1) 矿源容器（RCL2+）：第一时间铺，静态矿工 + 搬运工是产能的核心
@@ -753,8 +786,10 @@ function computeQuota(room, data) {
             const patrolBase = capacity >= 800 ? 3 : 2;
             quota.patroller = (data.hostiles && data.hostiles.length > 0) ? patrolBase + 1 : patrolBase;
         }
-        // 侦查兵：相邻房间情报缺失/过期时才派 1 个
+        // 侦查兵（安全房间）：相邻房间情报缺失/过期时才派 1 个
         quota.scout = hasStaleNeighbor(room.name) ? config.maxScouts : 0;
+        // 侦察兵（危险房间）：有"有主/见过敌人 + 情报过期"的相邻房间才派
+        quota.recon = hasReconTarget(room.name) ? 1 : 0;
     }
 
     // 升级者：容器体系搭起来后它就是"消耗端"，全链吞吐都被它卡着，所以要多配。
@@ -788,11 +823,39 @@ function computeQuota(room, data) {
         quota.remoteHarvester = capacity >= 1300 ? 3 : 2;
     }
 
+    // 扩张：① 已占但没 spawn 的房间 -> 派开拓者；② GCL 允许 -> 派占房者
+    quota.claimer = 0;
+    quota.pioneer = 0;
+    if (data.spawns.length > 0) {
+        const ownedRooms = [];
+        for (const n in Game.rooms) {
+            const r = Game.rooms[n];
+            if (r.controller && r.controller.my) ownedRooms.push(r);
+        }
+        let bootstrapRoom = null;
+        for (const r of ownedRooms) {
+            if (r.name === room.name) continue;
+            if (r.find(FIND_MY_SPAWNS).length === 0) { bootstrapRoom = r; break; }
+        }
+        if (bootstrapRoom) {
+            let pioneers = 0;
+            for (const n in Game.creeps) {
+                const c = Game.creeps[n];
+                if (c.memory && c.memory.role === 'pioneer' && c.memory.home === bootstrapRoom.name) pioneers++;
+            }
+            quota.pioneer = Math.max(0, 2 - pioneers);
+        } else if (Game.gcl && Game.gcl.level > ownedRooms.length) {
+            const t = pickClaimTarget(room);
+            if (t) quota.claimer = 1;
+        }
+    }
+
     // 总人数上限：按"先砍谁最不痛"的顺序裁剪，保证矿工/建造者/升级者都还留得住人
     const cap = creepCap(room);
     let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader
-        + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0)
-        + (quota.remoteHarvester || 0) + (quota.reserver || 0);
+        + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0) + (quota.recon || 0)
+        + (quota.remoteHarvester || 0) + (quota.reserver || 0)
+        + (quota.claimer || 0) + (quota.pioneer || 0);
     const floors = {
         // 增长引擎保底：矿工不砍、升级者/建造者各留 2、搬运 1、守卫各 1
         miner: quota.miner || 0,
@@ -806,7 +869,7 @@ function computeQuota(room, data) {
         patroller: 1,
     };
     // 裁剪顺序：先砍外围（远程/占领/侦查），最后才动经济核心
-    const trimOrder = ['remoteHarvester', 'reserver', 'scout', 'patroller', 'hauler', 'harvester', 'builder', 'upgrader'];
+    const trimOrder = ['claimer', 'pioneer', 'remoteHarvester', 'reserver', 'recon', 'scout', 'patroller', 'hauler', 'harvester', 'builder', 'upgrader'];
     while (total > cap) {
         let trimmed = false;
         for (const role of trimOrder) {
@@ -867,6 +930,17 @@ function pickSpawnRole(data, quota) {
 }
 
 /**
+ * 挑一个值得"占领"的相邻房间（无主、没敌人、矿源越多越优先）
+ */
+function pickClaimTarget(room) {
+    const cands = utils.expansionCandidates(room.name);
+    for (const c of cands) {
+        if (c.sources >= 2) return c.room;
+    }
+    return cands.length ? cands[0].room : null;
+}
+
+/**
  * 挑一个值得"预定"的相邻房间：无主、没敌人、矿源越多越优先
  */
 function pickReserveTarget(room) {
@@ -900,6 +974,28 @@ function pickRemoteTarget(room, data, skip) {
     // 同一个房间有多个矿源时，按索引换一个矿源
     const src = pick.sources[((skip || 0) / usable.length | 0) % pick.sources.length];
     return { room: pick.room, sourceId: src ? src.id : undefined };
+}
+
+/**
+ * 相邻房间是否有"值得冒险侦察"的目标（有主/见过敌人 + 情报过期）
+ */
+function hasReconTarget(homeName) {
+    let exits;
+    try {
+        exits = Game.map.describeExits(homeName) || {};
+    } catch (e) {
+        return false;
+    }
+    for (const dir in exits) {
+        const name = exits[dir];
+        if (!name || name === homeName) continue;
+        const info = utils.getIntel(name);
+        const age = info ? (Game.time - info.t) : 9999999;
+        if (age < config.reconStaleTicks) continue;
+        if (!info) return true;
+        if ((info.controller && info.controller.owner) || info.hostiles > 0) return true;
+    }
+    return false;
 }
 
 /**
@@ -975,6 +1071,21 @@ function runSpawns(room, data) {
     } else if (role === 'miner') {
         const source = assignSource(room, data, true);
         if (source) memory.sourceId = source.id;
+    } else if (role === 'claimer') {
+        const t = pickClaimTarget(room);
+        if (!t) return;
+        memory.targetRoom = t;
+    } else if (role === 'pioneer') {
+        // 开拓者由老家孵化，但归属新房间
+        let target = null;
+        for (const n in Game.rooms) {
+            const r = Game.rooms[n];
+            if (!r.controller || !r.controller.my) continue;
+            if (r.name === room.name) continue;
+            if (r.find(FIND_MY_SPAWNS).length === 0) { target = r.name; break; }
+        }
+        if (!target) return;
+        memory.home = target;
     } else if (role === 'patroller') {
         memory.sector = utils.countRole(data, 'patroller');
         memory.patrolIndex = memory.sector;
