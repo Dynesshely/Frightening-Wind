@@ -308,6 +308,26 @@ function planConstruction(room, data) {
 function containerNear(data, pos, range) {
     for (const c of data.containers) if (c.pos.getRangeTo(pos) <= range) return true;
     for (const s of data.sites) if (s.structureType === STRUCTURE_CONTAINER && s.pos.getRangeTo(pos) <= range) return true;
+
+    // 实时兜底：工地可能在本 tick 刚完工，data 快照里还没有这条结构
+    const room = data.room;
+    for (let dx = -range; dx <= range; dx++) {
+        for (let dy = -range; dy <= range; dy++) {
+            const x = pos.x + dx;
+            const y = pos.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+            let found;
+            try {
+                found = room.lookForAt(LOOK_STRUCTURES, x, y);
+            } catch (e) {
+                found = null;
+            }
+            if (!found) continue;
+            for (const s of found) {
+                if (s.structureType === STRUCTURE_CONTAINER) return true;
+            }
+        }
+    }
     return false;
 }
 

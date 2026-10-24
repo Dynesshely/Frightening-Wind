@@ -11,7 +11,7 @@ module.exports = {
     reportInterval: 25,
 
     // 每个房间允许同时存在的工地数量上限（宁少勿多，让建造者集中火力）
-    maxSitesPerRoom: 7,
+    maxSitesPerRoom: 4,
     maxSitesPerRoomHighRcl: 5,
     // 每 tick 最多新开工地数量
     maxNewSitesPerTick: 2,
