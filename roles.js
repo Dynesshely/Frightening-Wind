@@ -144,16 +144,33 @@ function builder(creep, data) {
 
 function upgrader(creep, data) {
     if (!utils.isWorking(creep)) {
-        // 优先吃控制器旁边容器里的能量（搬运工会往里倒），其次矿源侧容器，最后自己采
+        // 1) 就近有存量的容器/仓储 -> 取
         const near = utils.nearestEnergyStore(creep, data, 50, false);
         if (near && creep.pos.getRangeTo(near) <= 8) {
             utils.transferFrom(creep, near);
             return;
         }
         if (pickupLoose(creep, data)) return;
-        // spawn 已满 = 暂时不需要造兵，里面的能量闲着也是闲着，搬去升级
+        // 2) spawn 满仓时搬它的闲置能量
         const spare = utils.spawnSurplus(creep, data);
         if (spare) return;
+
+        // 3) 控制器旁有容器（哪怕一时空着）：原地等搬运工送货，
+        //    不要跑 20+ 格去矿源自己挖——那样往返一次只升级 50 点，血亏
+        const controller = data.room.controller;
+        if (controller) {
+            let waitingSpot = null;
+            for (const c of data.containers) {
+                if (c.pos.getRangeTo(controller) <= 3) { waitingSpot = c; break; }
+            }
+            if (waitingSpot) {
+                utils.say(creep, '💤');
+                if (creep.pos.getRangeTo(waitingSpot) > 1) utils.moveTo(creep, waitingSpot);
+                return;
+            }
+        }
+
+        // 4) 实在没有补给点才自己去采
         utils.harvestSource(creep, data);
         return;
     }
