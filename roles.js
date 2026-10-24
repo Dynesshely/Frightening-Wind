@@ -351,7 +351,21 @@ function soldier(creep, data) {
         Memory.fw.clearTarget = undefined;
     }
 
-    // 3) 和平时期：留 1 个常备军，多余的回收，避免白吃能量
+    // 3) 和平时期：先帮忙清路（有 WORK 就拆障），别站着发呆
+    if (creep.body && creep.body.some(p => p.type === WORK)) {
+        const blockers = keyNodes(creep.room);
+        for (let i = 0; i < blockers.length; i++) {
+            const st = firstBlocker(creep.room, blockers[i].pos, blockers[i].deep || 1);
+            if (st) {
+                utils.say(creep, '🚧');
+                const dr = creep.dismantle(st);
+                if (dr === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
+                return;
+            }
+        }
+    }
+
+    // 4) 无事可做：留 1 个常备军，多余的回收
     const soldiers = data.creeplist.filter(c => c.memory && c.memory.role === 'soldier').length;
     creep.memory.noEnemySince = creep.memory.noEnemySince || Game.time;
     const spawn = data.spawns[0];
@@ -394,32 +408,45 @@ function keyNodes(room) {
  * 道路通畅维保员：定时巡检关键节点，四邻里只要有"可破坏的阻塞结构"就拆掉。
  * 房间边界/地形墙不可破坏 -> 不管。
  */
+/**
+ * 找出"必须清掉"的阻塞结构（地形感知）：
+ * 沿上下左右四个方向逐格看，一旦遇到地形墙 → 该方向被山挡住，不再要求通畅，直接放弃这个方向；
+ * 遇到可走结构（路/容器/rampart）→ 继续往里看；遇到不可走的建筑 → 就是它，要拆掉。
+ */
+function firstBlocker(room, node, deep) {
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const terrain = room.getTerrain();
+    for (let j = 0; j < dirs.length; j++) {
+        for (let step = 1; step <= deep; step++) {
+            const x = node.x + dirs[j][0] * step;
+            const y = node.y + dirs[j][1] * step;
+            if (x < 1 || x > 48 || y < 1 || y > 48) break;
+            // 山体：这个方向地形上本来就过不去，不用管
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) break;
+            let found = [];
+            try { found = room.lookForAt(LOOK_STRUCTURES, x, y) || []; } catch (e) { found = []; }
+            if (!found.length) continue;
+            const st = found[0];
+            if (WALKABLE_TYPES[st.structureType]) continue;
+            if (st.structureType === STRUCTURE_SPAWN) continue;
+            if (st.structureType === STRUCTURE_WALL) continue;
+            return st;
+        }
+    }
+    return null;
+}
+
 function roadKeeper(creep, data) {
     const room = creep.room;
     const nodes = keyNodes(room);
-    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
     for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i];
-        const depth = node.deep || 1;
-        for (let j = 0; j < dirs.length; j++) {
-            for (let step = 1; step <= depth; step++) {
-                const x = node.pos.x + dirs[j][0] * step;
-                const y = node.pos.y + dirs[j][1] * step;
-                if (x < 1 || x > 48 || y < 1 || y > 48) break;
-                let found = [];
-                try { found = room.lookForAt(LOOK_STRUCTURES, x, y) || []; } catch (e) { found = []; }
-                if (!found.length) continue;
-                const st = found[0];
-                if (WALKABLE_TYPES[st.structureType]) continue;
-                if (st.structureType === STRUCTURE_SPAWN) continue;
-                // 只在自己房间里拆（别跑出去拆别人的），且要拆的必须能拆
-                if (st.structureType === STRUCTURE_WALL) continue;
-                utils.say(creep, '🚧');
-                const r = creep.dismantle(st);
-                if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
-                return;
-            }
+        const st = firstBlocker(room, nodes[i].pos, nodes[i].deep || 1);
+        if (st) {
+            utils.say(creep, '🚧');
+            const r = creep.dismantle(st);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
+            return;
         }
     }
 
