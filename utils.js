@@ -408,7 +408,7 @@ function withdrawEnergy(creep, data) {
 function transferFrom(creep, target) {
     say(creep, '📦');
     // 地上的掉落物只能用 pickup()，withdraw 会返回 ERR_INVALID_TARGET
-    const isDropped = target && target.resourceType !== undefined && target.amount !== undefined;
+    const isDropped = target && !target.store;
     const r = isDropped ? creep.pickup(target) : creep.withdraw(target, RESOURCE_ENERGY);
     if (r === ERR_NOT_IN_RANGE) {
         moveTo(creep, target);

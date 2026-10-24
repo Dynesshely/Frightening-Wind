@@ -548,9 +548,9 @@ function computeQuota(room, data) {
         quota.hauler = capacity < 550 ? 1 : (level >= 5 ? 4 : (level >= 4 ? 3 : 2));
     }
 
-    // 建造者：有工地才需要；工地多、能量上限高时多给
+    // 建造者：有工地才需要；工地多时多给（扩建=容量闸门，值得多投人）
     if (data.sites.length > 0) {
-        quota.builder = (data.sites.length >= 3 && capacity >= 800) ? 3 : 2;
+        quota.builder = data.sites.length >= 3 ? 3 : 2;
     }
 
     // 军事/侦查类兵种：只有经济已经转起来（至少 2 个经济单位、其中有采集者/矿工）才允许造，

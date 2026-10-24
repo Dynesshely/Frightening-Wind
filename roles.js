@@ -101,8 +101,10 @@ function hauler(creep, data) {
     if (utils.isWorking(creep)) {
         if (utils.deliverEnergy(creep, data)) return;
         if (utils.dumpSurplus(creep, data)) return;
-        if (utils.buildSomething(creep, data)) return;
-        utils.upgradeController(creep, data.room);
+        // 搬运工没有 WORK 部件，升级/建造都做不了 —— 就地待命等下游腾出空间
+        utils.say(creep, '💤');
+        const waitSpot = data.storage || data.spawns[0];
+        if (waitSpot && creep.pos.getRangeTo(waitSpot) > 2) utils.moveTo(creep, waitSpot, { range: 2 });
         return;
     }
 
