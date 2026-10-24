@@ -147,43 +147,221 @@ function upgrader(creep, data) {
     utils.buildSomething(creep, data);
 }
 
-/* ------------------------------ 防御者 ------------------------------ */
+/* ------------------------------ 远程采集者 ------------------------------ */
 
-function defender(creep, data) {
-    if (!data.hostiles || !data.hostiles.length) {
-        // 没敌人：常备军保留 1 个，其余在 spawn 附近待命一段时间后回收
-        const defenders = data.creeplist.filter(c => c.memory && c.memory.role === 'defender').length;
-        creep.memory.noEnemySince = creep.memory.noEnemySince || Game.time;
-        if (defenders > 1 && Game.time - creep.memory.noEnemySince > 150) {
-            const spawn = data.spawns[0];
-            if (spawn) {
-                if (creep.pos.getRangeTo(spawn) > 1) {
-                    utils.moveTo(creep, spawn);
-                } else {
-                    const r = spawn.recycleCreep(creep);
-                    if (r === OK) console.log('[FW] 回收闲置防御者 ' + creep.name);
-                }
-            }
+/**
+ * 去相邻房间挖矿再把能量背回来。
+ * 只在"本房间已经饱和"时启用（远距离往返效率天然比本地低，是增量而不是主力）。
+ */
+function remoteHarvester(creep, data) {
+    const home = creep.memory.home || creep.room.name;
+    const targetRoom = creep.memory.targetRoom;
+    if (!targetRoom) {
+        utils.say(creep, '❓');
+        return;
+    }
+
+    if (!utils.isWorking(creep)) {
+        if (creep.room.name !== targetRoom) {
+            utils.say(creep, '➡');
+            utils.moveToRoom(creep, targetRoom);
+            return;
+        }
+        let source = creep.memory.sourceId ? Game.getObjectById(creep.memory.sourceId) : null;
+        if (!source) {
+            const sources = creep.room.find(FIND_SOURCES);
+            if (!sources.length) return;
+            source = sources[0];
+            creep.memory.sourceId = source.id;
+        }
+        utils.say(creep, '⛏');
+        const r = creep.harvest(source);
+        if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, source);
+        return;
+    }
+
+    if (creep.room.name !== home) {
+        utils.say(creep, '🏠');
+        utils.moveToRoom(creep, home);
+        return;
+    }
+
+    if (utils.deliverEnergy(creep, data)) return;
+    if (utils.dumpSurplus(creep, data)) return;
+    // 实在没地方放：在 spawn 附近等，别乱跑
+    if (data.spawns[0]) utils.moveTo(creep, data.spawns[0], { range: 2 });
+}
+
+/* ------------------------------ 占领者 ------------------------------ */
+
+/**
+ * 去相邻房间预定控制器（reserve）：GCL 1 时还占不了房，
+ * 但预定能拿到房间视野、并在规则上锁住这块地不被别人先占。
+ */
+function reserver(creep, data) {
+    const targetRoom = creep.memory.targetRoom;
+    const home = creep.memory.home || creep.room.name;
+    if (!targetRoom) {
+        if (creep.room.name !== home) utils.moveToRoom(creep, home);
+        return;
+    }
+
+    if (creep.room.name !== targetRoom) {
+        utils.say(creep, '➡');
+        utils.moveToRoom(creep, targetRoom);
+        return;
+    }
+
+    const controller = creep.room.controller;
+    if (!controller) return;
+
+    // 已经是自己的：占完就该回收（留在原地纯浪费 TTL）
+    if (controller.my) {
+        utils.say(creep, '✅');
+        if (creep.room.name !== home) utils.moveToRoom(creep, home);
+        return;
+    }
+
+    if (controller.owner) {
+        // 被别人占了，放弃这个目标
+        utils.say(creep, '❌');
+        creep.memory.targetRoom = undefined;
+        if (creep.room.name !== home) utils.moveToRoom(creep, home);
+        return;
+    }
+
+    utils.say(creep, '🚩');
+    const r = creep.reserveController(controller);
+    if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, controller, { range: 1 });
+    else if (r === OK) utils.recordIntel(creep.room);
+    else if (r === ERR_INVALID_TARGET) {
+        // 敌方预定中，留着继续观察
+        utils.recordIntel(creep.room);
+    }
+}
+
+/* ------------------------------ 士兵 ------------------------------ */
+
+function soldier(creep, data) {
+    // 1) 本房间有敌人：直接上
+    if (data.hostiles && data.hostiles.length) {
+        const target = creep.pos.findClosestByRange(data.hostiles);
+        if (target) {
+            utils.say(creep, '⚔');
+            creep.memory.noEnemySince = undefined;
+            const r = creep.attack(target);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target);
+            return;
+        }
+    }
+
+    // 2) 有指定的"清场目标"（例如准备占领的房间里有敌人）：跨房间去打
+    const clearRoom = Memory.fw && Memory.fw.clearTarget;
+    if (clearRoom) {
+        if (creep.room.name !== clearRoom) {
+            utils.say(creep, '➡');
+            utils.moveToRoom(creep, clearRoom);
+            return;
+        }
+        const enemy = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+        if (enemy) {
+            utils.say(creep, '⚔');
+            const r = creep.attack(enemy);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, enemy);
+            return;
+        }
+        // 清完了
+        utils.recordIntel(creep.room);
+        Memory.fw.clearTarget = undefined;
+    }
+
+    // 3) 和平时期：留 1 个常备军，多余的回收，避免白吃能量
+    const soldiers = data.creeplist.filter(c => c.memory && c.memory.role === 'soldier').length;
+    creep.memory.noEnemySince = creep.memory.noEnemySince || Game.time;
+    const spawn = data.spawns[0];
+    if (!spawn) return;
+
+    if (soldiers > 1 && Game.time - creep.memory.noEnemySince > 150) {
+        if (creep.pos.getRangeTo(spawn) > 1) utils.moveTo(creep, spawn);
+        else if (spawn.recycleCreep(creep) === OK) console.log('[FW] 回收闲置士兵 ' + creep.name);
+        return;
+    }
+    if (creep.pos.getRangeTo(spawn) > 3) utils.moveTo(creep, spawn, { range: 3 });
+}
+
+/* ------------------------------ 侦查兵 ------------------------------ */
+
+/**
+ * 挑一个"情报缺失/过期"的相邻房间。
+ * 返回房间名，全部都很新时返回 null。
+ */
+function pickScoutTarget(homeName) {
+    if (!homeName) return null;
+    let exits;
+    try {
+        exits = Game.map.describeExits(homeName) || {};
+    } catch (e) {
+        return null;
+    }
+    let best = null;
+    for (const dir in exits) {
+        const name = exits[dir];
+        if (!name || name === homeName) continue;
+        const info = utils.getIntel(name);
+        const age = info ? (Game.time - info.t) : 9999999;
+        if (age < config.intelStaleTicks) continue;
+        if (!best || age > best.age) best = { name: name, age: age };
+    }
+    return best ? best.name : null;
+}
+
+function scout(creep, data) {
+    const home = creep.memory.home || creep.room.name;
+
+    // 人在外地：顺手刷新当前房间情报
+    if (creep.room.name !== home) {
+        const info = utils.getIntel(creep.room.name);
+        if (!info || Game.time - info.t > 200) utils.recordIntel(creep.room);
+    }
+
+    let target = creep.memory.scoutTarget;
+
+    // 到达目标：记录情报
+    if (target && creep.room.name === target) {
+        utils.recordIntel(creep.room);
+        creep.memory.scoutTarget = undefined;
+        target = undefined;
+        utils.say(creep, '🔍');
+    }
+
+    if (!target) target = pickScoutTarget(home);
+
+    if (!target) {
+        // 情报都很新：回老家待命（别在野外乱跑）
+        if (creep.room.name !== home) {
+            utils.say(creep, '🏠');
+            utils.moveToRoom(creep, home);
         } else {
-            const spawn = data.spawns[0];
-            if (spawn && creep.pos.getRangeTo(spawn) > 3) utils.moveTo(creep, spawn, { range: 3 });
+            utils.say(creep, '💤');
         }
         return;
     }
 
-    creep.memory.noEnemySince = undefined;
-    const target = creep.pos.findClosestByRange(data.hostiles);
-    if (!target) return;
-    utils.say(creep, '⚔');
-    const r = creep.attack(target);
-    if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target);
+    creep.memory.scoutTarget = target;
+    if (creep.room.name !== target) {
+        utils.say(creep, '➡');
+        utils.moveToRoom(creep, target);
+    }
 }
 
 /* ------------------------------ 分发 ------------------------------ */
 
 const BEHAVIORS = {
-    defender: defender,
+    soldier: soldier,
+    scout: scout,
+    reserver: reserver,
     harvester: harvester,
+    remoteHarvester: remoteHarvester,
     miner: miner,
     hauler: hauler,
     builder: builder,
@@ -203,4 +381,4 @@ function run(creep) {
     fn(creep, data);
 }
 
-module.exports = { run };
+module.exports = { run, pickScoutTarget };

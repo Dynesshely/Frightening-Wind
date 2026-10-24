@@ -20,6 +20,8 @@ function housekeeping() {
     for (const name in Game.creeps) {
         const creep = Game.creeps[name];
         if (!creep.memory) creep.memory = {};
+        // 旧角色名迁移（defender -> soldier）
+        if (creep.memory.role === 'defender') creep.memory.role = 'soldier';
         if (!creep.memory.role || !config.bodies[creep.memory.role]) {
             creep.memory.role = utils.inferRole(creep);
         }
@@ -75,48 +77,95 @@ function runRoom(room) {
  * 角色就地转换：当容器体系搭好、自采工人超额时，把多余的工人直接改成矿工/搬运工，
  * 不用等它们老死（否则容器建好后要空转上千 tick 才有人去用）。
  */
+/**
+ * 身体能否胜任某个角色
+ */
+function canDo(creep, role) {
+    const body = creep.body || [];
+    const has = type => body.some(p => p.type === type);
+    switch (role) {
+        case 'miner':
+        case 'harvester':
+        case 'remoteHarvester':
+        case 'builder':
+        case 'upgrader':
+            return has(WORK) && has(CARRY);
+        case 'hauler':
+            return has(CARRY);
+        case 'soldier':
+            return has(ATTACK) || has(RANGED_ATTACK);
+        case 'scout':
+            return has(MOVE);
+        default:
+            return false;
+    }
+}
+
+/**
+ * 通用补位：某个角色缺人时，从"高于下限的冗余角色"里征调身体合适的 creep 就地转职。
+ * 好处是岗位空缺立刻补上，不用等 spawn 造人（造人要 3*部件数 tick + 攒能量）。
+ */
 function rebalanceRoles(room, data) {
     const quota = computeQuota(room, data);
     const have = n => data.creepsByRole[n] || 0;
 
-    let surplusHarvester = have('harvester') - (quota.harvester || 0);
-    if (surplusHarvester <= 0) return;
+    // 每个角色不能被抽空的下限
+    const floors = {
+        miner: quota.miner || 0,
+        harvester: Math.min(2, quota.harvester || 0),
+        hauler: Math.min(1, quota.hauler || 0),
+        builder: Math.min(1, quota.builder || 0),
+        upgrader: Math.min(1, quota.upgrader || 0),
+        soldier: Math.min(1, quota.soldier || 0),
+        scout: 0,
+        remoteHarvester: 0,
+    };
+
+    const deficits = [];
+    for (const role of config.spawnPriority) {
+        const want = quota[role] || 0;
+        if (want <= 0) continue;
+        const miss = want - have(role);
+        if (miss > 0) deficits.push({ role: role, missing: miss, ratio: have(role) / want });
+    }
+    if (!deficits.length) return;
+    deficits.sort((a, b) => a.ratio - b.ratio);
 
     const containerSources = data.sources.filter(s => sourceHasContainer(data, s));
 
-    for (const creep of data.creeplist) {
-        if (surplusHarvester <= 0) break;
-        if (!creep.memory || creep.memory.role !== 'harvester') continue;
+    for (const d of deficits) {
+        for (const creep of data.creeplist) {
+            if (d.missing <= 0 || have(d.role) >= (quota[d.role] || 0)) break;
+            const cur = creep.memory && creep.memory.role;
+            if (!cur || cur === d.role) continue;
+            if (!canDo(creep, d.role)) continue;
+            if (have(cur) <= (floors[cur] || 0)) continue;   // 当前角色不能低于下限
 
-        // 1) 欠缺静态矿工，且这个工人正好负责一个有容器的矿源 -> 转矿工
-        if (have('miner') < (quota.miner || 0)) {
-            const sid = creep.memory.sourceId;
-            let ok = false;
-            for (const s of containerSources) if (s.id === sid) ok = true;
-            if (!ok && containerSources.length) {
-                creep.memory.sourceId = containerSources[0].id;
-                ok = true;
+            // 矿工得绑定一个"有容器的矿源"
+            if (d.role === 'miner') {
+                const sid = creep.memory.sourceId;
+                let ok = false;
+                for (const s of containerSources) if (s.id === sid) ok = true;
+                if (!ok) {
+                    if (!containerSources.length) continue;
+                    creep.memory.sourceId = containerSources[0].id;
+                }
             }
-            if (ok) {
-                creep.memory.role = 'miner';
-                creep.memory.working = undefined;
-                data.creepsByRole.harvester = Math.max(0, have('harvester') - 1);
-                data.creepsByRole.miner = have('miner') + 1;
-                surplusHarvester--;
-                console.log('[FW] ' + creep.name + ' 转职为 miner（容器体系已就绪）');
-                continue;
+            // 远程采集者要目标房间
+            if (d.role === 'remoteHarvester') {
+                const target = pickRemoteTarget(room, data);
+                if (!target) continue;
+                creep.memory.targetRoom = target.room;
+                creep.memory.sourceId = target.sourceId;
             }
-        }
 
-        // 2) 欠缺搬运工 -> 转搬运工
-        if (have('hauler') < (quota.hauler || 0)) {
-            creep.memory.role = 'hauler';
+            creep.memory.role = d.role;
             creep.memory.working = undefined;
-            data.creepsByRole.harvester = Math.max(0, have('harvester') - 1);
-            data.creepsByRole.hauler = have('hauler') + 1;
-            surplusHarvester--;
-            console.log('[FW] ' + creep.name + ' 转职为 hauler（容器体系已就绪）');
-            continue;
+            creep.memory.noEnemySince = undefined;
+            data.creepsByRole[cur] = Math.max(0, have(cur) - 1);
+            data.creepsByRole[d.role] = have(d.role) + 1;
+            d.missing--;
+            console.log('[FW] ' + creep.name + ' 转职 ' + cur + ' -> ' + d.role + '（岗位补位）');
         }
     }
 }
@@ -414,18 +463,42 @@ function computeQuota(room, data) {
         quota.builder = (data.sites.length >= 3 && capacity >= 800) ? 3 : 2;
     }
 
-    // 防御者：房间里有敌人人时才造（1~3 个），经济单位打不了架
-    if (data.hostiles && data.hostiles.length > 0) {
-        quota.defender = Math.min(3, data.hostiles.length + 1);
+    // 军事/侦查类兵种：只有经济已经转起来（至少 2 个经济单位、其中有采集者/矿工）才允许造，
+    // 否则 130 能量的士兵会把这个房间的启动资金吃掉，直接锁死经济
+    const econCount = (data.creepsByRole.harvester || 0) + (data.creepsByRole.miner || 0) + (data.creepsByRole.hauler || 0);
+    const econHealthy = econCount >= 2 && ((data.creepsByRole.harvester || 0) + (data.creepsByRole.miner || 0)) >= 1;
+
+    const militaryAllowed = (data.hostiles && data.hostiles.length > 0) || level >= 2;
+    if (econHealthy && militaryAllowed) {
+        // 士兵：房间里有敌人才造（经济单位打不了架），和平时期留 1 个常备军
+        quota.soldier = data.hostiles && data.hostiles.length > 0
+            ? Math.min(4, data.hostiles.length + 1)
+            : 1;
+        // 侦查兵：相邻房间情报缺失/过期时才派 1 个
+        quota.scout = hasStaleNeighbor(room.name) ? config.maxScouts : 0;
     }
 
     // 升级者：只有容器/仓储体系搭起来后才值得专派（否则它自己跑矿源太浪费）
     // RCL5 起 3 个，其余 2 个
     quota.upgrader = containerized > 0 ? (level >= 5 ? 3 : 2) : 0;
 
+    // 占领者：RCL4+ 才有余粮养（650 能量的 CLAIM 单位），目标是相邻的优质空地
+    quota.reserver = 0;
+    if (level >= 4 && (data.creepsByRole.reserver || 0) === 0) {
+        const target = pickReserveTarget(room);
+        if (target) quota.reserver = 1;
+    }
+
+    // 远程采矿：只有"本地已经饱和"才派——两个矿源都有容器、没工地、RCL3+、人数够
+    quota.remoteHarvester = 0;
+    if (level >= 3 && containerized >= 2 && data.sites.length === 0 && data.creeplist.length >= 8) {
+        quota.remoteHarvester = 2;
+    }
+
     // 总人数上限：按"先砍谁最不痛"的顺序裁剪，保证矿工/建造者/升级者都还留得住人
     const cap = creepCap(room);
-    let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader;
+    let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader
+        + (quota.soldier || 0) + (quota.scout || 0) + (quota.remoteHarvester || 0) + (quota.reserver || 0);
     const floors = {
         harvester: 2,
         hauler: 1,
@@ -481,12 +554,60 @@ function pickSpawnRole(data, quota) {
     for (const role of config.spawnPriority) {
         const want = quota[role] || 0;
         if (want <= 0) continue;
-        const have = utils.countRole(data, role);
-        if (have >= want) continue;
-        missing.push({ role: role, ratio: have / want });
+        // 快死的算半个（提前补位，避免岗位真空），正在孵化的也算上
+        const alive = utils.countRole(data, role);
+        const leaving = (data.leavingByRole && data.leavingByRole[role]) || 0;
+        const effective = alive - leaving;
+        if (effective >= want) continue;
+        missing.push({ role: role, ratio: Math.max(0, effective) / want });
     }
     missing.sort((a, b) => a.ratio - b.ratio);
     return missing.map(m => m.role);
+}
+
+/**
+ * 挑一个值得"预定"的相邻房间：无主、没敌人、矿源越多越优先
+ */
+function pickReserveTarget(room) {
+    const cands = utils.expansionCandidates(room.name);
+    for (const c of cands) {
+        if (c.sources >= 2) return c.room;
+    }
+    return cands.length ? cands[0].room : null;
+}
+
+/**
+ * 挑一个可以远程采矿的相邻房间（无主、没敌人、有矿源）
+ */
+function pickRemoteTarget(room, data) {
+    const cands = utils.expansionCandidates(room.name);
+    for (const c of cands) {
+        const info = utils.getIntel(c.room);
+        if (!info || !info.sources || !info.sources.length) continue;
+        if (info.hostiles > 0) continue;
+        return { room: c.room, sourceId: info.sources[0].id };
+    }
+    return null;
+}
+
+/**
+ * 相邻房间是否有情报缺失/过期（决定要不要派侦查）
+ */
+function hasStaleNeighbor(roomName) {
+    let exits;
+    try {
+        exits = Game.map.describeExits(roomName) || {};
+    } catch (e) {
+        return false;
+    }
+    for (const dir in exits) {
+        const name = exits[dir];
+        if (!name || name === roomName) continue;
+        const info = utils.getIntel(name);
+        if (!info) return true;
+        if (Game.time - info.t > config.intelStaleTicks) return true;
+    }
+    return false;
 }
 
 function creepCap(room) {
@@ -521,7 +642,9 @@ function runSpawns(room, data) {
     let role = null;
     let body = null;
     for (const candidate of wanted) {
-        const b = utils.planBody(candidate, budget);
+        const def = config.bodies[candidate];
+        const roleBudget = def && def.maxCost ? Math.min(budget, def.maxCost) : budget;
+        const b = utils.planBody(candidate, roleBudget);
         if (b) { role = candidate; body = b; break; }
     }
     if (!body) return;
@@ -536,6 +659,15 @@ function runSpawns(room, data) {
     } else if (role === 'miner') {
         const source = assignSource(room, data, true);
         if (source) memory.sourceId = source.id;
+    } else if (role === 'reserver') {
+        const target = pickReserveTarget(room);
+        if (!target) return;
+        memory.targetRoom = target;
+    } else if (role === 'remoteHarvester') {
+        const target = pickRemoteTarget(room, data);
+        if (!target) return;   // 没有合适目标就不造
+        memory.targetRoom = target.room;
+        if (target.sourceId) memory.sourceId = target.sourceId;
     }
 
     const r = spawn.spawnCreep(body, name, { memory: memory });

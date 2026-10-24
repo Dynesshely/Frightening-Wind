@@ -63,11 +63,18 @@ function roomData(room) {
     d.damageable = d.structures.concat(d.containers, d.roads);
     d.spawnList = d.spawns;
 
-    // 按角色统计本房 creep
+    // 按角色统计本房 creep；顺带记录"快死了的"和"正在孵化的"
     d.creepsByRole = {};
+    d.leavingByRole = {};
+    d.spawningByRole = {};
     for (const c of d.creeplist) {
         const r = (c.memory && c.memory.role) || 'unknown';
         d.creepsByRole[r] = (d.creepsByRole[r] || 0) + 1;
+        if (c.spawning) {
+            d.spawningByRole[r] = (d.spawningByRole[r] || 0) + 1;
+        } else if (typeof c.ticksToLive === 'number' && c.ticksToLive < config.replaceTtl) {
+            d.leavingByRole[r] = (d.leavingByRole[r] || 0) + 1;
+        }
     }
 
     cache.rooms[room.name] = d;
@@ -115,6 +122,130 @@ function isWorking(creep) {
     if (used === 0) creep.memory.working = false;
     else if (used >= capacity) creep.memory.working = true;
     return creep.memory.working === true;
+}
+
+/**
+ * 跨房间移动：先走向目标房间的出口，再在目标房间内走。
+ * （Screeps 里对另一个房间的坐标 moveTo 不行，必须走出口）
+ */
+function moveToRoom(creep, roomName) {
+    if (creep.room.name === roomName) return true;
+    // 直接朝目标房间内部的坐标 moveTo，引擎自己会算出口/跨房间路径。
+    // （不要自己找"最近的边缘格"——creep 可能就站在那一格上，于是永远不动）
+    try {
+        const target = new RoomPosition(25, 25, roomName);
+        const r = creep.moveTo(target, { reusePath: 20 });
+        if (r === OK) { bump('moveRoom'); return true; }
+        if (r === ERR_TIRED) return true;
+        if (r === ERR_NO_PATH) bump('moveRoomNoPath');
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * 根据出口方向（Game.map.describeExits 的 key：1/3/5/7）算房间里靠近该边的格子
+ */
+function findExitTowards(creep, dir) {
+    const terrain = creep.room.getTerrain();
+    const x = creep.pos.x;
+    const y = creep.pos.y;
+    const candidates = [];
+    for (let i = 2; i < 48; i++) {
+        let px = x;
+        let py = y;
+        if (dir === 1 || dir === '1') { px = i; py = 0; }
+        else if (dir === 3 || dir === '3') { px = 49; py = i; }
+        else if (dir === 5 || dir === '5') { px = i; py = 49; }
+        else if (dir === 7 || dir === '7') { px = 0; py = i; }
+        else return null;
+        if (terrain.get(px, py) === TERRAIN_MASK_WALL) continue;
+        candidates.push(creep.room.getPositionAt(px, py));
+    }
+    if (!candidates.length) return null;
+    let best = candidates[0];
+    for (const c of candidates) {
+        if (creep.pos.getRangeTo(c) < creep.pos.getRangeTo(best)) best = c;
+    }
+    return best;
+}
+
+/* ------------------------------ 房间情报 ------------------------------ */
+
+function intel() {
+    if (!Memory.fw) Memory.fw = {};
+    if (!Memory.fw.intel) Memory.fw.intel = {};
+    return Memory.fw.intel;
+}
+
+function getIntel(roomName) {
+    return intel()[roomName] || null;
+}
+
+/**
+ * 记录一个房间的情报（视野内才有效）。只存坐标/数字/用户名，不存游戏对象。
+ */
+function recordIntel(room) {
+    const data = {
+        t: Game.time,
+        name: room.name,
+        controller: null,
+        sources: [],
+        mineral: null,
+        hostiles: 0,
+        myStructures: 0,
+        enemyStructures: 0,
+    };
+    try {
+        if (room.controller) {
+            data.controller = {
+                x: room.controller.pos.x,
+                y: room.controller.pos.y,
+                level: room.controller.level,
+                owner: room.controller.owner ? room.controller.owner.username : null,
+                my: !!room.controller.my,
+                reservation: room.controller.reservation ? room.controller.reservation.username : null,
+            };
+        }
+        for (const s of room.find(FIND_SOURCES)) data.sources.push({ x: s.pos.x, y: s.pos.y, id: s.id });
+        const mineral = room.find(FIND_MINERALS)[0];
+        if (mineral) data.mineral = { type: mineral.mineralType, x: mineral.pos.x, y: mineral.pos.y };
+        data.hostiles = room.find(FIND_HOSTILE_CREEPS).length;
+        for (const st of room.find(FIND_STRUCTURES)) {
+            if (st.my) data.myStructures++;
+            else if (st.structureType === STRUCTURE_SPAWN || st.structureType === STRUCTURE_EXTENSION
+                || st.structureType === STRUCTURE_TOWER) data.enemyStructures++;
+        }
+    } catch (e) {
+        data.error = String(e && e.message || e).slice(0, 120);
+    }
+    intel()[room.name] = data;
+    return data;
+}
+
+/**
+ * 候选扩张目标：相邻房间里"无主、有 2 个以上矿源、没敌人占地"的
+ */
+function expansionCandidates(roomName) {
+    const exits = (Game.map.describeExits(roomName) || {});
+    const out = [];
+    for (const dir in exits) {
+        const name = exits[dir];
+        if (!name) continue;
+        const info = getIntel(name);
+        if (!info || !info.controller) continue;
+        if (info.controller.owner) continue;          // 有人占了
+        if (info.hostiles > 0) continue;              // 有敌人先不打
+        out.push({
+            room: name,
+            sources: info.sources.length,
+            mineral: info.mineral ? info.mineral.type : null,
+            seen: info.t,
+        });
+    }
+    out.sort((a, b) => b.sources - a.sources);
+    return out;
 }
 
 /* ------------------------------ 计数 ------------------------------ */
@@ -600,6 +731,11 @@ module.exports = {
     bodyCost,
     say,
     isWorking,
+    moveToRoom,
+    recordIntel,
+    getIntel,
+    intel,
+    expansionCandidates,
     inferRole,
     countRole,
 };

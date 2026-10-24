@@ -34,12 +34,25 @@ module.exports = {
         hauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10 },
         builder: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 6 },
         upgrader: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
-        // 防御者：只堆 ATTACK + MOVE，房间里有敌人时才造
-        defender: { unit: ['attack', 'move'], filler: ['attack', 'move'], maxUnits: 5 },
+        // 远程采集者：和本地采集者同款（要能挖能背）
+        remoteHarvester: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 5 },
+        // 占领者：CLAIM + MOVE，去相邻房间预定控制器（CLAIM 600 能量，所以只造 1 个）
+        reserver: { unit: ['claim', 'move'], filler: [], maxUnits: 1, maxCost: 650 },
+        // 士兵：只堆 ATTACK + MOVE，有敌情时才造
+        soldier: { unit: ['attack', 'move'], filler: ['attack', 'move'], maxUnits: 8, maxCost: 300 },
+        // 侦查兵：纯 MOVE，50 能量一个，跑得快、活得久
+        scout: { unit: ['move'], filler: [], maxUnits: 4, maxCost: 100 },
     },
 
     // 生成优先级（同缺口比例时排在前的优先）
-    spawnPriority: ['defender', 'miner', 'hauler', 'harvester', 'upgrader', 'builder'],
+    spawnPriority: ['soldier', 'scout', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
+
+    // 侦查：房间情报多少 tick 后视为过期
+    intelStaleTicks: 2000,
+    // 一个房间最多同时派几个侦查兵
+    maxScouts: 1,
+    // 提前替代：creep 剩余 TTL 低于该值就开始补位（避免岗位真空）
+    replaceTtl: 120,
 
     // 各等级扩展数量
     extensionLimit: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 },

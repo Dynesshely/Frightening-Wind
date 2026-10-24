@@ -50,7 +50,10 @@ function report() {
             + ' | spawn ' + spawnText);
     }
 
-    lines.push('[FW] 全局 creep: ' + totalCreeps);
+    lines.push('[FW] 全局 creep: ' + totalCreeps
+        + ' | GCL ' + (Game.gcl ? Game.gcl.level : '?')
+        + ' | 士兵 ' + (() => { let n = 0; for (const k in Game.creeps) if (Game.creeps[k].memory && Game.creeps[k].memory.role === 'soldier') n++; return n; })()
+        + ' | 情报房间 ' + (Memory.fw && Memory.fw.intel ? Object.keys(Memory.fw.intel).length : 0));
     console.log(lines.join('\n'));
 }
 
@@ -75,7 +78,29 @@ function recordError(where, e) {
  */
 function snapshot(rooms) {
     if (!Memory.fw) Memory.fw = {};
-    const out = { t: Game.time, cpu: Math.round(Game.cpu.getUsed() * 100) / 100, bucket: Game.cpu.bucket, rooms: [] };
+    const out = {
+        t: Game.time,
+        cpu: Math.round(Game.cpu.getUsed() * 100) / 100,
+        bucket: Game.cpu.bucket,
+        gcl: Game.gcl ? { level: Game.gcl.level, progress: Game.gcl.progress, total: Game.gcl.progressTotal } : null,
+        intel: {},
+        rooms: [],
+    };
+
+    // 情报摘要：哪些房间被侦查过、能不能扩张
+    if (Memory.fw && Memory.fw.intel) {
+        for (const name in Memory.fw.intel) {
+            const i = Memory.fw.intel[name];
+            out.intel[name] = {
+                t: i.t,
+                src: i.sources ? i.sources.length : 0,
+                ctrl: i.controller ? (i.controller.owner || (i.controller.my ? 'me' : 'none')) : 'none',
+                lvl: i.controller ? i.controller.level : 0,
+                hostile: i.hostiles,
+                mineral: i.mineral ? i.mineral.type : null,
+            };
+        }
+    }
     for (const room of rooms) {
         const creeps = room.find(FIND_MY_CREEPS);
         const roles = {};
