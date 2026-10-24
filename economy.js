@@ -806,6 +806,10 @@ function computeQuota(room, data) {
 
     const quota = { harvester: 0, miner: 0, hauler: 0, builder: 0, upgrader: 0 };
 
+    // 每个矿源按"地形能站几个位"来定编，而不是无脑 2 人一个源：
+    // 站位不够就少派人（否则就是排队干等），站位够但产能已满也只要 2 人
+    // （矿源 3000 能量 / 300 tick 再生 = 10 E/tick，2 个 3WORK 矿工刚好吃满）
+
     // 已经被容器覆盖的矿源交给静态矿工
     let containerized = 0;
     for (const s of data.sources) {
@@ -813,12 +817,20 @@ function computeQuota(room, data) {
     }
     const bare = data.sources.length - containerized;
 
-    // 静态矿工：一个矿源一个
-    quota.miner = containerized;
+    // 静态矿工：按地形站位定编，最多 2 人/源（再多就是排队）
+    quota.miner = 0;
+    for (const s of data.sources) {
+        if (!sourceHasContainer(data, s)) continue;
+        quota.miner += Math.max(1, Math.min(2, utils.harvestSlots(s)));
+    }
 
     // 自采工人：没有容器的矿源，每个矿源 2 个；能量上限高时 3 个
-    const perSource = capacity >= 800 ? 3 : 2;
-    quota.harvester = bare * perSource;
+    // 自采工人同样按地形站位定编（没有容器的矿源）
+    quota.harvester = 0;
+    for (const s of data.sources) {
+        if (sourceHasContainer(data, s)) continue;
+        quota.harvester += Math.max(1, Math.min(capacity >= 800 ? 3 : 2, utils.harvestSlots(s)));
+    }
 
     // 搬运工：有容器才需要；能量上限低时先给 1 个（货源不足，多了只会闲置）
     if (containerized > 0) {

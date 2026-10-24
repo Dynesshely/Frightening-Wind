@@ -300,6 +300,36 @@ function moveTo(creep, target, opts) {
     return r === OK || r === ERR_TIRED || r === ERR_NO_PATH;
 }
 
+/**
+ * 一个矿源旁边到底能站几个采集位：数一数 8 邻格里"可走且没被结构占死"的数量。
+ * 采集只需要 range 1，所以对角位也算。地形墙/建筑挡住的位置不能站人。
+ */
+function harvestSlots(source) {
+    const room = source.room;
+    if (!room) return 1;
+    const terrain = room.getTerrain();
+    let slots = 0;
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const x = source.pos.x + dx;
+            const y = source.pos.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+            let blocked = false;
+            try {
+                const found = room.lookForAt(LOOK_STRUCTURES, x, y);
+                for (const s of found) {
+                    // 路/容器/rampart 能站人，其它结构挡位
+                    if (s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_CONTAINER && s.structureType !== STRUCTURE_RAMPART) blocked = true;
+                }
+            } catch (e) { }
+            if (!blocked) slots++;
+        }
+    }
+    return slots;
+}
+
 /* ------------------------------ 采集 ------------------------------ */
 
 /**
@@ -781,6 +811,7 @@ module.exports = {
     getIntel,
     intel,
     expansionCandidates,
+    harvestSlots,
     inferRole,
     countRole,
 };
