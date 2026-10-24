@@ -37,23 +37,58 @@ function report() {
         const spawnText = spawns.map(s => s.name + (s.spawning ? '(busy)' : '(idle)')).join(',') || '-';
 
         const sites = room.find(FIND_CONSTRUCTION_SITES);
-        const structs = room.find(FIND_MY_STRUCTURES);
-        const containers = structs.filter(s => s.structureType === STRUCTURE_CONTAINER).length;
-        const links = structs.filter(s => s.structureType === STRUCTURE_LINK).length;
+        const allStructs = room.find(FIND_STRUCTURES);
+        const containers = allStructs.filter(s => s.structureType === STRUCTURE_CONTAINER);
+        const links = allStructs.filter(s => s.structureType === STRUCTURE_LINK);
+        const storage = allStructs.filter(s => s.structureType === STRUCTURE_STORAGE)[0];
+
+        let storedEnergy = 0;
+        for (const c of containers) storedEnergy += c.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+        for (const l of links) storedEnergy += l.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+        if (storage) storedEnergy += storage.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
 
         lines.push('    ' + pad(room.name, 8)
             + ' RCL' + room.controller.level
-            + ' 能量 ' + room.energyAvailable + '/' + room.energyCapacityAvailable
+            + ' 进度 ' + room.controller.progress + '/' + room.controller.progressTotal
+            + ' | 能量 ' + room.energyAvailable + '/' + room.energyCapacityAvailable
+            + ' | 库存 ' + storedEnergy
             + ' | creep ' + creeps.length + ' [' + roleText.trim() + ']'
             + ' | 工地 ' + sites.length
-            + ' | 容器 ' + containers + ' 链接 ' + links
+            + ' | 容器 ' + containers.length + ' link ' + links.length
             + ' | spawn ' + spawnText);
     }
 
-    lines.push('[FW] 全局 creep: ' + totalCreeps
-        + ' | GCL ' + (Game.gcl ? Game.gcl.level : '?')
-        + ' | 士兵 ' + (() => { let n = 0; for (const k in Game.creeps) if (Game.creeps[k].memory && Game.creeps[k].memory.role === 'soldier') n++; return n; })()
-        + ' | 情报房间 ' + (Memory.fw && Memory.fw.intel ? Object.keys(Memory.fw.intel).length : 0));
+    // 情报与扩张候选
+    let intelText = '';
+    let bestTarget = '-';
+    const intel = (Memory.fw && Memory.fw.intel) || {};
+    const names = Object.keys(intel);
+    if (names.length) {
+        const cands = [];
+        for (const n of names) {
+            const i = intel[n];
+            if (!i.controller || i.controller.owner) continue;
+            if (i.hostiles > 0) continue;
+            cands.push({ name: n, src: (i.sources || []).length, mineral: i.mineral ? i.mineral.type : '-' });
+        }
+        cands.sort((a, b) => b.src - a.src);
+        bestTarget = cands.length ? (cands[0].name + '(' + cands[0].src + '矿/' + cands[0].mineral + ')') : '无';
+        intelText = ' | 情报 ' + names.length + ' 房';
+    }
+
+    let army = 0;
+    for (const k in Game.creeps) {
+        if (Game.creeps[k].memory && Game.creeps[k].memory.role === 'soldier') army++;
+    }
+
+    const errs = (Memory.fw && Memory.fw.errors) || [];
+
+    lines.push('[FW] 总 creep ' + totalCreeps
+        + ' | GCL ' + (Game.gcl ? Game.gcl.level : '?') + '(' + (Game.gcl ? Game.gcl.progress : 0) + '/' + (Game.gcl ? Game.gcl.progressTotal : 0) + ')'
+        + ' | 兵 ' + army
+        + intelText
+        + ' | 最优扩张 ' + bestTarget
+        + (errs.length ? ' | 异常 ' + errs.length + ' 条(见 Memory.fw.errors)' : ' | 无异常'));
     console.log(lines.join('\n'));
 }
 
