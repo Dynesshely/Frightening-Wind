@@ -337,15 +337,25 @@ function scout(creep, data) {
     if (!target) target = pickScoutTarget(home);
 
     if (!target) {
-        // 情报都很新：回老家待命（别在野外乱跑）
+        // 情报都很新：回老家待命；待太久就回收（名额让给经济单位）
         if (creep.room.name !== home) {
             utils.say(creep, '🏠');
+            creep.memory.idleSince = undefined;
             utils.moveToRoom(creep, home);
-        } else {
-            utils.say(creep, '💤');
+            return;
+        }
+        utils.say(creep, '💤');
+        creep.memory.idleSince = creep.memory.idleSince || Game.time;
+        if (Game.time - creep.memory.idleSince > 250) {
+            const spawn = data.spawns[0];
+            if (spawn) {
+                if (creep.pos.getRangeTo(spawn) > 1) utils.moveTo(creep, spawn);
+                else if (spawn.recycleCreep(creep) === OK) console.log('[FW] 回收闲置侦查兵 ' + creep.name);
+            }
         }
         return;
     }
+    creep.memory.idleSince = undefined;
 
     creep.memory.scoutTarget = target;
     if (creep.room.name !== target) {

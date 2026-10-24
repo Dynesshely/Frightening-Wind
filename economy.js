@@ -233,7 +233,8 @@ function freeSpots(room, occ, cx, cy, minR, maxR, avoid) {
     const spots = [];
     for (let dy = -maxR; dy <= maxR; dy++) {
         for (let dx = -maxR; dx <= maxR; dx++) {
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            // Screeps 用的是切比雪夫距离：对角格算 1 格，采集/建造都能选对角
+            const dist = Math.max(Math.abs(dx), Math.abs(dy));
             if (dist < minR || dist > maxR) continue;
             const x = cx + dx;
             const y = cy + dy;
@@ -611,7 +612,7 @@ function hasStaleNeighbor(roomName) {
 }
 
 function creepCap(room) {
-    return 5 + Math.floor((room.energyCapacityAvailable || 300) / 100);
+    return 6 + Math.floor((room.energyCapacityAvailable || 300) / 100);
 }
 
 function runSpawns(room, data) {
