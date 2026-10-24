@@ -289,7 +289,9 @@ function bump(name) {
 
 function moveTo(creep, target, opts) {
     if (!target) return false;
-    const options = Object.assign({ reusePath: config.pathReuse, ignoreCreeps: false }, opts || {});
+    // 关键：路径计算必须忽略其它 creep。
+    // 否则多个 creep 挤在一起时会互相把对方当路障，全员 ERR_NO_PATH 永久卡死（线上踩过）。
+    const options = Object.assign({ reusePath: config.pathReuse, ignoreCreeps: true }, opts || {});
     const r = creep.moveTo(target, options);
     if (r === OK) bump('move');
     else if (r === ERR_NO_PATH) bump('noPath');

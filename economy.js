@@ -402,11 +402,19 @@ function planConstruction(room, data) {
         }
     }
 
-    // 3) 扩展
+    // 3) 扩展（避让 spawn 的十字通道：x==center.x 或 y==center.y 的格子永不建结构，
+    //    否则一圈围墙会把 spawn 包死，单位挤在里面互相卡住）
     const extLimit = config.extensionLimit[level] || 0;
+    const highway = avoid.slice();
+    for (let i = 2; i <= 12; i++) {
+        highway.push({ x: center.x, y: center.y - i });
+        highway.push({ x: center.x, y: center.y + i });
+        highway.push({ x: center.x - i, y: center.y });
+        highway.push({ x: center.x + i, y: center.y });
+    }
     let extTotal = data.extensions.length + countSites(data, STRUCTURE_EXTENSION);
     while (extTotal < extLimit && created < config.maxNewSitesPerTick && siteCount() < siteLimit) {
-        const spots = freeSpots(room, occ, center.x, center.y, 2, 8, avoid);
+        const spots = freeSpots(room, occ, center.x, center.y, 2, 8, highway);
         if (!spots.length) break;
         const spot = spots[0];
         if (createSite(room, spot, STRUCTURE_EXTENSION)) {
