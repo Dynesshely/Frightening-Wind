@@ -378,14 +378,15 @@ const WALKABLE_TYPES = (function () {
 /** 关键节点：spawn / 容器 / 控制器 / 矿源 —— 四邻必须通畅 */
 function keyNodes(room) {
     const nodes = [];
-    try { for (const s of room.find(FIND_MY_SPAWNS)) nodes.push(s.pos); } catch (e) { }
+    // spawn：正交四向要深查到 3 格（基地主通道，最容易被扩展堵死）
+    try { for (const s of room.find(FIND_MY_SPAWNS)) nodes.push({ pos: s.pos, deep: 3 }); } catch (e) { }
     try {
         for (const s of room.find(FIND_STRUCTURES)) {
-            if (s.structureType === STRUCTURE_CONTAINER) nodes.push(s.pos);
+            if (s.structureType === STRUCTURE_CONTAINER) nodes.push({ pos: s.pos, deep: 1 });
         }
     } catch (e) { }
-    if (room.controller) nodes.push(room.controller.pos);
-    try { for (const s of room.find(FIND_SOURCES)) nodes.push(s.pos); } catch (e) { }
+    if (room.controller) nodes.push({ pos: room.controller.pos, deep: 1 });
+    try { for (const s of room.find(FIND_SOURCES)) nodes.push({ pos: s.pos, deep: 1 }); } catch (e) { }
     return nodes;
 }
 
@@ -400,20 +401,25 @@ function roadKeeper(creep, data) {
 
     for (let i = 0; i < nodes.length; i++) {
         const node = nodes[i];
+        const depth = node.deep || 1;
         for (let j = 0; j < dirs.length; j++) {
-            const x = node.x + dirs[j][0];
-            const y = node.y + dirs[j][1];
-            if (x < 1 || x > 48 || y < 1 || y > 48) continue;
-            let found = [];
-            try { found = room.lookForAt(LOOK_STRUCTURES, x, y) || []; } catch (e) { found = []; }
-            if (!found.length) continue;
-            const st = found[0];
-            if (WALKABLE_TYPES[st.structureType]) continue;
-            if (st.structureType === STRUCTURE_SPAWN) continue;
-            utils.say(creep, '🚧');
-            const r = creep.dismantle(st);
-            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
-            return;
+            for (let step = 1; step <= depth; step++) {
+                const x = node.pos.x + dirs[j][0] * step;
+                const y = node.pos.y + dirs[j][1] * step;
+                if (x < 1 || x > 48 || y < 1 || y > 48) break;
+                let found = [];
+                try { found = room.lookForAt(LOOK_STRUCTURES, x, y) || []; } catch (e) { found = []; }
+                if (!found.length) continue;
+                const st = found[0];
+                if (WALKABLE_TYPES[st.structureType]) continue;
+                if (st.structureType === STRUCTURE_SPAWN) continue;
+                // 只在自己房间里拆（别跑出去拆别人的），且要拆的必须能拆
+                if (st.structureType === STRUCTURE_WALL) continue;
+                utils.say(creep, '🚧');
+                const r = creep.dismantle(st);
+                if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
+                return;
+            }
         }
     }
 
