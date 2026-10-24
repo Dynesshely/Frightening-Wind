@@ -131,18 +131,37 @@ function isWorking(creep) {
  */
 function moveToRoom(creep, roomName) {
     if (creep.room.name === roomName) return true;
-    // 直接朝目标房间内部的坐标 moveTo，引擎自己会算出口/跨房间路径。
-    // （不要自己找"最近的边缘格"——creep 可能就站在那一格上，于是永远不动）
     try {
-        const target = new RoomPosition(25, 25, roomName);
-        const r = creep.moveTo(target, { reusePath: 20 });
-        if (r === OK) { bump('moveRoom'); return true; }
+        // 直接朝目标房间内部的坐标 moveTo，引擎自己会算出口/跨房间路径。
+        // （不要自己找"最近的边缘格"——creep 可能就站在那一格上，于是永远不动）
+        const r = creep.moveTo(new RoomPosition(25, 25, roomName), { reusePath: 10 });
+        if (r === OK) { bump('moveRoom'); creep.memory.stuckSince = undefined; return true; }
         if (r === ERR_TIRED) return true;
-        if (r === ERR_NO_PATH) bump('moveRoomNoPath');
-        return false;
+        bump('moveRoomNoPath');
     } catch (e) {
-        return false;
+        // 忽略，走兜底
     }
+
+    // 兜底：可能卡在房间边角/目标不可达——先往本房间中心走两步解卡
+    try {
+        const home = new RoomPosition(25, 25, creep.room.name);
+        if (creep.pos.getRangeTo(home) > 3) {
+            creep.moveTo(home, { reusePath: 5 });
+        } else {
+            // 已经在中心还走不出去：记一次卡住，久了就放弃当前目标
+            creep.memory.stuckSince = creep.memory.stuckSince || Game.time;
+            if (Game.time - creep.memory.stuckSince > 40) {
+                if (Memory.fw && Memory.fw.intel) Memory.fw.intel[roomName] = Memory.fw.intel[roomName] || null;
+                creep.memory.targetRoom = undefined;
+                creep.memory.scoutTarget = undefined;
+                creep.memory.stuckSince = undefined;
+                bump('moveRoomGiveUp');
+            }
+        }
+    } catch (e) {
+        // 放弃
+    }
+    return false;
 }
 
 /**
@@ -388,7 +407,9 @@ function withdrawEnergy(creep, data) {
 
 function transferFrom(creep, target) {
     say(creep, '📦');
-    const r = creep.withdraw(target, RESOURCE_ENERGY);
+    // 地上的掉落物只能用 pickup()，withdraw 会返回 ERR_INVALID_TARGET
+    const isDropped = target && target.resourceType !== undefined && target.amount !== undefined;
+    const r = isDropped ? creep.pickup(target) : creep.withdraw(target, RESOURCE_ENERGY);
     if (r === ERR_NOT_IN_RANGE) {
         moveTo(creep, target);
         return true;

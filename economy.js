@@ -568,9 +568,9 @@ function computeQuota(room, data) {
         quota.scout = hasStaleNeighbor(room.name) ? config.maxScouts : 0;
     }
 
-    // 升级者：只有容器/仓储体系搭起来后才值得专派（否则它自己跑矿源太浪费）
-    // RCL5 起 3 个，其余 2 个
-    quota.upgrader = containerized > 0 ? (level >= 5 ? 3 : 2) : 0;
+    // 升级者：容器体系搭起来后它就是"消耗端"，全链吞吐都被它卡着，所以要多配。
+    // RCL2~4: 4 个；RCL5+: 5 个（再高由下面的"库存自适应"继续加）
+    quota.upgrader = containerized > 0 ? (level >= 5 ? 5 : 4) : 0;
 
     // 占领者：RCL4+ 才有余粮养（650 能量的 CLAIM 单位），目标是相邻的优质空地
     quota.reserver = 0;
@@ -587,8 +587,8 @@ function computeQuota(room, data) {
         quota.hauler++;
     }
 
-    // 自适应：仓储/容器里存量大 -> 加升级者（最多 4 个），把存量变成 RCL
-    if (storedEnergy >= 1000 && quota.upgrader < 4) {
+    // 自适应：仓储/容器里存量大 -> 加升级者（最多 6 个），把存量变成 RCL
+    if (storedEnergy >= 800 && quota.upgrader > 0 && quota.upgrader < 6) {
         quota.upgrader++;
     }
 
@@ -714,7 +714,7 @@ function hasStaleNeighbor(roomName) {
 }
 
 function creepCap(room) {
-    return 6 + Math.floor((room.energyCapacityAvailable || 300) / 100);
+    return 7 + Math.floor((room.energyCapacityAvailable || 300) / 100);
 }
 
 function runSpawns(room, data) {
