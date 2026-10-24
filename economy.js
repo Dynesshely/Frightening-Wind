@@ -742,12 +742,15 @@ function runSpawns(room, data) {
 
     const quota = computeQuota(room, data);
     const wanted = pickSpawnRole(data, quota);
-    const ownedTotal = data.creeplist.length;
 
     // 总数上限：人太多会吃掉全部能量用于更新换代。
     // 但防御者属于应急，允许突破上限（不然房间里有敌人时没人能打）
-    const urgentDefender = wanted.length > 0 && wanted[0] === 'defender';
-    if (!urgentDefender && data.creeplist.length >= creepCap(room)) return;
+    let ownedCount = 0;
+    if (data.ownedByRole) for (const r in data.ownedByRole) ownedCount += data.ownedByRole[r];
+    else ownedCount = data.creeplist.length;
+
+    const urgentMilitary = wanted.length > 0 && (wanted[0] === 'soldier' || wanted[0] === 'patroller');
+    if (!urgentMilitary && ownedCount >= creepCap(room)) return;
 
     if (!wanted.length) {
         // 配额已满但 spawn 满仓（能量没处花）：多造一个采集者换产能，上限见 cap
