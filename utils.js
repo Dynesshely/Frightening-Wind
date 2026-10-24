@@ -385,6 +385,79 @@ function ensureSlot(creep, source) {
     return slots[0];
 }
 
+/**
+ * 威胁分级：按"能力"而不是"存在"来决定响应。
+ *   damage    - 有 ATTACK/RANGED_ATTACK：会杀单位，最危险
+ *   structure - 只有 WORK：拆建筑（拆迁兵），对单位无威胁但对基建致命
+ *   harmless  - 其它（纯搬运/纯移动/侦察兵）：可以无视
+ */
+function classifyHostiles(hostiles) {
+    const out = { all: hostiles || [], damage: [], structure: [], harmless: [] };
+    const list = out.all;
+    for (let i = 0; i < list.length; i++) {
+        const h = list[i];
+        let dmg = false;
+        let work = false;
+        if (h && h.body) {
+            for (let j = 0; j < h.body.length; j++) {
+                const t = h.body[j].type;
+                if (t === ATTACK || t === RANGED_ATTACK) dmg = true;
+                else if (t === WORK) work = true;
+            }
+        }
+        if (dmg) out.damage.push(h);
+        else if (work) out.structure.push(h);
+        else out.harmless.push(h);
+    }
+    return out;
+}
+
+/**
+ * 连通性校验（地形感知）：把候选位置当成障碍后，看 spawn 还能摸到几个出口。
+ * 规划期（选址）和运行期（巡检）共用同一套判定，避免两套逻辑漂移。
+ */
+function accessCount(room, occ, extraBlocked, center) {
+    const R = 5;
+    const terrain = room.getTerrain();
+    const key = (x, y) => x + ',' + y;
+    const blocked = {};
+    for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+            const x = center.x + dx;
+            const y = center.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) { blocked[key(x, y)] = true; continue; }
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) blocked[key(x, y)] = true;
+            else if (occ && occ[key(x, y)]) blocked[key(x, y)] = true;
+        }
+    }
+    if (extraBlocked) blocked[key(extraBlocked.x, extraBlocked.y)] = true;
+    blocked[key(center.x, center.y)] = false;
+    const seen = {};
+    seen[key(center.x, center.y)] = true;
+    const queue = [[center.x, center.y]];
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    let border = 0;
+    while (queue.length) {
+        const cur = queue.shift();
+        if (Math.abs(cur[0] - center.x) === R || Math.abs(cur[1] - center.y) === R) border++;
+        for (let i = 0; i < 4; i++) {
+            const nx = cur[0] + dirs[i][0];
+            const ny = cur[1] + dirs[i][1];
+            const k = key(nx, ny);
+            if (seen[k] || blocked[k]) continue;
+            if (nx < 1 || nx > 48 || ny < 1 || ny > 48) continue;
+            seen[k] = true;
+            queue.push([nx, ny]);
+        }
+    }
+    return border;
+}
+
+/** 放这个位置会不会封路（出口少于 6 个） */
+function wouldBlockAccess(room, occ, spot, center) {
+    return accessCount(room, occ, spot, center) < 6;
+}
+
 /* ------------------------------ 采集 ------------------------------ */
 
 /**
@@ -867,6 +940,9 @@ module.exports = {
     intel,
     expansionCandidates,
     harvestSlots,
+    classifyHostiles,
+    accessCount,
+    wouldBlockAccess,
     slotList,
     ensureSlot,
     inferRole,

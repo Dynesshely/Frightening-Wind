@@ -69,6 +69,13 @@ module.exports = {
     // 提前替代：creep 剩余 TTL 低于该值就开始补位（避免岗位真空）
     replaceTtl: 120,
 
+    // ---- P2 行为阈值集中管理 ----
+    roleHysteresis: 150,        // 同一角色最少在岗 tick
+    connectMinExits: 6,         // 建造选址：spawn 至少保留几个可达出口
+    patrolLowHits: 0.45,        // 巡逻兵血量低于该比例回塔疗伤
+    fleeRange: 4,               // 威胁型敌人进入该范围才撤退
+    towerRepairRatio: 0.7,      // 塔能量高于该比例才参与维修
+
     // 侦察：进危险房间后最多停留多少 tick（信息一拿到就走）
     reconStayTicks: 3,
     // 侦察情报多久算过期

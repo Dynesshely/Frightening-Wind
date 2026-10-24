@@ -287,7 +287,9 @@ function rebalanceRoles(room, data) {
                 creep.memory.sourceId = target.sourceId;
             }
 
+            if (cur && (Game.time - (creep.memory.roleSince || 0)) < 150) continue;   // 滞回：刚转职的先别动
             creep.memory.role = d.role;
+            creep.memory.roleSince = Game.time;
             creep.memory.working = undefined;
             creep.memory.noEnemySince = undefined;
             creep.memory.recycle = undefined;
@@ -404,6 +406,11 @@ function createSite(room, spot, type, label) {
  * 这样地形墙本身挡住的方向不算数，只有"本来能走、却被建筑堵死"才算问题。
  */
 function wouldBlockAccess(room, occ, spot, center) {
+    // P1：统一到 utils 的单一实现（规划期与运行期共用同一套判定）
+    return utils.wouldBlockAccess(room, occ, spot, center);
+}
+
+function wouldBlockAccessLegacy(room, occ, spot, center) {
     const R = 5;
     const terrain = room.getTerrain();
     const blocked = {};

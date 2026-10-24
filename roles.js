@@ -375,7 +375,10 @@ function claimer(creep, data) {
 function soldier(creep, data) {
     // 1) 本房间有敌人：直接上
     if (data.hostiles && data.hostiles.length) {
-        const target = creep.pos.findClosestByRange(data.hostiles);
+        // P1 威胁分级：先打有攻击力的，再打拆家兵，无害的最后
+        const tiers = utils.classifyHostiles(data.hostiles);
+        const pool = tiers.damage.length ? tiers.damage : (tiers.structure.length ? tiers.structure : tiers.harmless);
+        const target = creep.pos.findClosestByRange(pool);
         if (target) {
             utils.say(creep, '⚔');
             creep.memory.noEnemySince = undefined;
