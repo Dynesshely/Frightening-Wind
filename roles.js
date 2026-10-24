@@ -365,6 +365,18 @@ function soldier(creep, data) {
         }
     }
 
+    // 3.5) 没有障碍可拆：当工兵——采矿、送货、升级
+    if (creep.body && creep.body.some(p => p.type === WORK)) {
+        if (utils.isWorking(creep)) {
+            if (utils.deliverEnergy(creep, data)) return;
+            if (utils.buildSomething(creep, data)) return;
+            utils.upgradeController(creep, data.room);
+            return;
+        }
+        utils.harvestSource(creep, data);
+        return;
+    }
+
     // 4) 无事可做：留 1 个常备军，多余的回收
     const soldiers = data.creeplist.filter(c => c.memory && c.memory.role === 'soldier').length;
     creep.memory.noEnemySince = creep.memory.noEnemySince || Game.time;

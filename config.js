@@ -45,7 +45,8 @@ module.exports = {
         // 巡逻兵：ATTACK + MOVE，常备边防（RCL3 起 2 人，受袭时加到 3）
         patroller: { unit: ['attack', 'move'], filler: [], maxUnits: 3, maxCost: 400 },
         // 士兵：只堆 ATTACK + MOVE，有敌情时才造
-        soldier: { unit: ['attack', 'move'], filler: ['attack', 'move'], maxUnits: 8, maxCost: 300 },
+        // 士兵：每个单元 ATTACK+MOVE+WORK —— 战时输出火力，和平时期能采矿/拆障当工兵
+        soldier: { unit: ['attack', 'move', 'work'], filler: ['attack', 'move'], maxUnits: 6, maxCost: 500 },
         // 侦查兵：纯 MOVE，50 能量一个，跑得快、活得久（只去安全/无主房间）
         scout: { unit: ['move'], filler: [], maxUnits: 4, maxCost: 100 },
         // 侦察兵：进敌对/危险房间拿情报，2~3 个 MOVE，进得去跑得掉
