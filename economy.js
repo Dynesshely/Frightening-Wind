@@ -52,6 +52,7 @@ function ownedRooms() {
 function runRoom(room) {
     const data = utils.roomData(room);
     defense.run(room, data);      // 塔 / 安全模式 / 逃跑 / 防御工事
+    runLinks(room, data);         // RCL5+ 的 link 瞬移
     rebalanceRoles(room, data);   // 容器体系建好后，把多余的自采工人转成矿工/搬运工
 
     // 诊断信息（每 50 tick 写一次 Memory，外部可读）
@@ -349,9 +350,97 @@ function planConstruction(room, data) {
         }
     }
 
+    // 5.5) Link（RCL5+）：矿源旁边一个"发送端"，控制器/仓储旁边一个"接收端"
+    const linkLimit = config.linkLimit[level] || 0;
+    if (linkLimit > 0) {
+        const linkTotal = data.links.length + countSites(data, STRUCTURE_LINK);
+        if (linkTotal < linkLimit && created < config.maxNewSitesPerTick) {
+            const spot = findLinkSpot(room, data, occ);
+            if (spot && createSite(room, spot, STRUCTURE_LINK, spot.label)) {
+                occ[spot.x + ',' + spot.y] = true;
+                created++;
+            }
+        }
+    }
+
     // 6) 道路：只铺主要通勤路径上的沼泽段（平地本来就能满速走，铺路是浪费）
     if (level >= 2 && created < config.maxNewSitesPerTick) {
         planRoads(room, data, occ, created);
+    }
+}
+
+/**
+ * 给 link 找位置：
+ *  - 先把"矿源侧发送端"补齐（贴在矿源旁容器旁边，矿工站在容器上就能倒进去）
+ *  - 再放"核心侧接收端"（控制器/仓储/no spawn 附近）
+ */
+function findLinkSpot(room, data, occ) {
+    const terrain = room.getTerrain();
+
+    // 1) 矿源侧：优先找有容器但还没 link 的矿源
+    for (const source of data.sources) {
+        let hasLink = false;
+        for (const l of data.links) if (l.pos.getRangeTo(source.pos) <= 3) hasLink = true;
+        for (const s of data.sites) if (s.structureType === STRUCTURE_LINK && s.pos.getRangeTo(source.pos) <= 3) hasLink = true;
+        if (hasLink) continue;
+
+        // 贴着矿源旁的容器放（这样矿工站在容器上 range 1 就能 transfer）
+        for (const c of data.containers) {
+            if (c.pos.getRangeTo(source.pos) > 2) continue;
+            const spots = freeSpots(room, occ, c.pos.x, c.pos.y, 1, 1, []);
+            for (const sp of spots) {
+                if (sp.x === source.pos.x && sp.y === source.pos.y) continue;
+                return { x: sp.x, y: sp.y, label: 'source-link' };
+            }
+        }
+        // 没有容器就贴着矿源
+        const spots = freeSpots(room, occ, source.pos.x, source.pos.y, 2, 2, []);
+        if (spots.length) return { x: spots[0].x, y: spots[0].y, label: 'source-link' };
+    }
+
+    // 2) 核心侧：控制器 > 仓储 > spawn
+    let center = null;
+    if (room.controller) center = room.controller.pos;
+    else if (data.storage) center = data.storage.pos;
+    else if (data.spawns[0]) center = data.spawns[0].pos;
+    if (!center) return null;
+    const spots = freeSpots(room, occ, center.x, center.y, 2, 4, []);
+    if (!spots.length) return null;
+    return { x: spots[0].x, y: spots[0].y, label: 'hub-link' };
+}
+
+/**
+ * Link 调度：把矿源侧的能量瞬移到核心侧（不消耗 creep 运输时间）
+ */
+function runLinks(room, data) {
+    if (!data.links || data.links.length < 2) return;
+
+    const receivers = [];
+    for (const l of data.links) {
+        let recv = false;
+        if (room.controller && l.pos.getRangeTo(room.controller) <= 4) recv = true;
+        if (data.storage && l.pos.getRangeTo(data.storage) <= 3) recv = true;
+        if (!recv && data.spawns[0] && l.pos.getRangeTo(data.spawns[0]) <= 3) recv = true;
+        if (recv) receivers.push(l);
+    }
+    if (!receivers.length) return;
+
+    // 挑能量最少的接收端
+    let target = receivers[0];
+    for (const r of receivers) {
+        if ((r.store.getUsedCapacity(RESOURCE_ENERGY) || 0) < (target.store.getUsedCapacity(RESOURCE_ENERGY) || 0)) target = r;
+    }
+    if ((target.store.getFreeCapacity(RESOURCE_ENERGY) || 0) <= 0) return;
+
+    for (const l of data.links) {
+        if (l.id === target.id) continue;
+        if (receivers.indexOf(l) !== -1) continue;
+        if ((l.store.getUsedCapacity(RESOURCE_ENERGY) || 0) < 100) continue;
+        try {
+            l.transferEnergy(target);
+        } catch (e) {
+            // 忽略：下一 tick 再试
+        }
     }
 }
 
@@ -488,6 +577,19 @@ function computeQuota(room, data) {
     if (level >= 4 && (data.creepsByRole.reserver || 0) === 0) {
         const target = pickReserveTarget(room);
         if (target) quota.reserver = 1;
+    }
+
+    // 自适应：容器里明显压货 -> 加搬运工（最多 3 个）
+    let storedEnergy = 0;
+    for (const c of data.containers) storedEnergy += (c.store.getUsedCapacity(RESOURCE_ENERGY) || 0);
+    if (data.storage) storedEnergy += (data.storage.store.getUsedCapacity(RESOURCE_ENERGY) || 0);
+    if (containerized > 0 && storedEnergy >= 400 && quota.hauler < 3) {
+        quota.hauler++;
+    }
+
+    // 自适应：仓储/容器里存量大 -> 加升级者（最多 4 个），把存量变成 RCL
+    if (storedEnergy >= 1000 && quota.upgrader < 4) {
+        quota.upgrader++;
     }
 
     // 远程采矿：只有"本地已经饱和"才派——两个矿源都有容器、没工地、RCL3+、人数够

@@ -62,6 +62,8 @@ module.exports = {
     canBuildContainers: 2,
     // 各等级 storage
     canBuildStorage: 4,
+    // 各等级 link 数量
+    linkLimit: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 2, 6: 3, 7: 4, 8: 6 },
 
     // 单次任务寻路的复用 tick 数（降低 CPU）
     pathReuse: 8,

@@ -56,7 +56,22 @@ function miner(creep, data) {
         return;
     }
 
-    // 满了：优先倒进矿源旁的容器
+    // 满了：优先倒进矿源旁的 link（瞬时传送），其次容器
+    let link = null;
+    let linkDist = 999;
+    if (data.links) {
+        for (const l of data.links) {
+            if (l.pos.getRangeTo(source.pos) > 3) continue;
+            if (utils.freeEnergyCap(l) <= 0) continue;
+            const d = creep.pos.getRangeTo(l);
+            if (d < linkDist) { linkDist = d; link = l; }
+        }
+    }
+    if (link) {
+        utils.transferTo(creep, link);
+        return;
+    }
+
     let container = null;
     let bestDist = 3;
     for (const c of data.containers) {

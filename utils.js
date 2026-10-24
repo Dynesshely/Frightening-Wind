@@ -59,6 +59,7 @@ function roomData(room) {
     // 容器 / 道路 / 墙 / rampart 属于中立结构，不在 FIND_MY_STRUCTURES 里
     d.containers = d.allStructures.filter(s => s.structureType === STRUCTURE_CONTAINER);
     d.roads = d.allStructures.filter(s => s.structureType === STRUCTURE_ROAD);
+    d.links = d.allStructures.filter(s => s.structureType === STRUCTURE_LINK);
     d.walls = d.allStructures.filter(s => s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART);
     d.damageable = d.structures.concat(d.containers, d.roads);
     d.spawnList = d.spawns;
@@ -355,6 +356,7 @@ function nearestEnergyStore(creep, data, minAmount, excludeController) {
     };
     if (data.storage) consider(data.storage);
     for (const c of data.containers) consider(c);
+    if (data.links) for (const l of data.links) consider(l);
     return best;
 }
 
@@ -442,16 +444,26 @@ function transferTo(creep, target) {
  * 这样升级者不用跑到矿源去取能量，直接在控制器旁边就能续杯。
  */
 function dumpSurplus(creep, data) {
-    const controller = data.room.controller;
-    if (!controller) return false;
     let best = null;
     let bestDist = 999;
-    for (const c of data.containers) {
-        if (c.pos.getRangeTo(controller) > 3) continue;
-        if (freeEnergyCap(c) <= 0) continue;
-        const d = creep.pos.getRangeTo(c);
-        if (d < bestDist) { bestDist = d; best = c; }
+
+    // storage 优先（容量大、不会像容器那样被工人顺手抽走）
+    if (data.storage && freeEnergyCap(data.storage) > 0) {
+        best = data.storage;
+        bestDist = creep.pos.getRangeTo(data.storage);
     }
+
+    // 其次：控制器旁的容器（就地喂升级者）
+    const controller = data.room.controller;
+    if (controller) {
+        for (const c of data.containers) {
+            if (c.pos.getRangeTo(controller) > 3) continue;
+            if (freeEnergyCap(c) <= 0) continue;
+            const d = creep.pos.getRangeTo(c);
+            if (d < bestDist) { bestDist = d; best = c; }
+        }
+    }
+
     if (!best) return false;
     return transferTo(creep, best);
 }
