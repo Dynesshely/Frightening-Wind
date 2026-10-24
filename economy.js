@@ -55,6 +55,15 @@ function ownedRooms() {
 function tagSpawns(rooms) {
     if (!Memory.fw) Memory.fw = {};
     if (!Memory.fw.spawnTags) Memory.fw.spawnTags = {};
+    // Spawn 利用率：空闲 tick / 总 tick（验证"spawn 是否已成瓶颈"）
+    if (!Memory.fw.spawnStat) Memory.fw.spawnStat = { busy: 0, total: 0, t: Game.time };
+    const SS = Memory.fw.spawnStat;
+    SS.total++;
+    for (const sp of (room.find(FIND_MY_SPAWNS) || [])) if (sp.spawning) { SS.busy++; break; }
+    if (Game.time - SS.t >= 50) {
+        Memory.fw.spawnUsage = { t: Game.time, ratio: SS.total ? (SS.busy / SS.total) : 0 };
+        SS.busy = 0; SS.total = 0; SS.t = Game.time;
+    }
     const tags = Memory.fw.spawnTags;
     for (const room of rooms) {
         const spawns = room.spawns && room.spawns.length ? room.spawns : room.find(FIND_MY_SPAWNS);
@@ -72,9 +81,54 @@ function tagSpawns(rooms) {
 
 /* ------------------------------ 房间主流程 ------------------------------ */
 
+/**
+ * P0 能量流水账：把能量去向记账，定位"未核销"差额。
+ * 收入用矿源能量下降量估算（最可靠，不依赖动作计数），支出用控制器进度/工地进度差分。
+ */
+function trackLedger(room, data) {
+    if (!Memory.fw) Memory.fw = {};
+    if (!Memory.fw.ledger) Memory.fw.ledger = { t: Game.time, income: 0, upgrade: 0, build: 0, store: 0, src: {}, prog: 0, siteProg: 0 };
+    const L = Memory.fw.ledger;
+    if (!L.src) L.src = {};
+
+    let store = 0;
+    for (const c of data.creeplist) if (c.store) store += c.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+    for (const s of data.allStructures) if (s.store) store += s.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+
+    for (const src of data.sources) {
+        const prev = L.src[src.id];
+        if (prev !== undefined && prev > src.energy) L.income += (prev - src.energy);
+        L.src[src.id] = src.energy;
+    }
+
+    const ctrl = room.controller;
+    if (ctrl) {
+        if (L.prog !== undefined && ctrl.progress > L.prog) L.upgrade += (ctrl.progress - L.prog);
+        L.prog = ctrl.progress;
+    }
+
+    let siteProg = 0;
+    for (const s of data.sites) siteProg += (s.progress || 0);
+    if (L.siteProg !== undefined && siteProg > L.siteProg) L.build += (siteProg - L.siteProg);
+    L.siteProg = siteProg;
+
+    const elapsed = Game.time - L.t;
+    if (elapsed >= 50) {
+        const delta = store - (L.store || 0);
+        Memory.fw.ledgerLast = {
+            t: Game.time, ticks: elapsed,
+            income: L.income, upgrade: L.upgrade, build: L.build,
+            storeDelta: delta,
+            unaccounted: L.income - L.upgrade - L.build - delta,
+        };
+        L.t = Game.time; L.income = 0; L.upgrade = 0; L.build = 0; L.store = store;
+    }
+}
+
 function runRoom(room) {
     const data = utils.roomData(room);
     tagSpawns([room]);
+    trackLedger(room, data);
     defense.run(room, data);      // 塔 / 安全模式 / 逃跑 / 防御工事
     runLinks(room, data);         // RCL5+ 的 link 瞬移
 
