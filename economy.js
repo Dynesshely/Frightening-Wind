@@ -831,6 +831,10 @@ function computeQuota(room, data) {
         quota.remoteHarvester = capacity >= 1300 ? 3 : 2;
     }
 
+    // 道路通畅维保员：常备 1 人（RCL2+），关键节点被堵就拆
+    quota.roadKeeper = 0;
+    if (level >= 2 && data.spawns.length > 0) quota.roadKeeper = 1;
+
     // 扩张：① 已占但没 spawn 的房间 -> 派开拓者；② GCL 允许 -> 派占房者
     quota.claimer = 0;
     quota.pioneer = 0;
@@ -863,7 +867,7 @@ function computeQuota(room, data) {
     let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader
         + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0) + (quota.recon || 0)
         + (quota.remoteHarvester || 0) + (quota.reserver || 0)
-        + (quota.claimer || 0) + (quota.pioneer || 0);
+        + (quota.claimer || 0) + (quota.pioneer || 0) + (quota.roadKeeper || 0);
     const floors = {
         // 增长引擎保底：矿工不砍、升级者/建造者各留 2、搬运 1、守卫各 1
         miner: quota.miner || 0,
@@ -877,7 +881,7 @@ function computeQuota(room, data) {
         patroller: 1,
     };
     // 裁剪顺序：先砍外围（远程/占领/侦查），最后才动经济核心
-    const trimOrder = ['claimer', 'pioneer', 'remoteHarvester', 'reserver', 'recon', 'scout', 'patroller', 'hauler', 'harvester', 'builder', 'upgrader'];
+    const trimOrder = ['claimer', 'pioneer', 'roadKeeper', 'remoteHarvester', 'reserver', 'recon', 'scout', 'patroller', 'hauler', 'harvester', 'builder', 'upgrader'];
     while (total > cap) {
         let trimmed = false;
         for (const role of trimOrder) {

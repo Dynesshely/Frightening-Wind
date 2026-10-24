@@ -34,6 +34,8 @@ module.exports = {
         hauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10 },
         builder: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 6 },
         upgrader: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
+        // 道路通畅维保员：WORK(拆障) + CARRY(收废料) + MOVE
+        roadKeeper: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 4, maxCost: 400 },
         // 远程采集者：和本地采集者同款（要能挖能背）
         remoteHarvester: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 5 },
         // 占领者：CLAIM + MOVE，去相邻房间预定控制器（CLAIM 600 能量，所以只造 1 个）
@@ -53,7 +55,7 @@ module.exports = {
     },
 
     // 生成优先级（同缺口比例时排在前的优先）
-    spawnPriority: ['claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
+    spawnPriority: ['claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon', 'roadKeeper', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
 
     // 侦查：房间情报多少 tick 后视为过期
     intelStaleTicks: 2000,

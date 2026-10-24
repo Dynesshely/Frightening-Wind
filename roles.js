@@ -365,6 +365,63 @@ function soldier(creep, data) {
     if (creep.pos.getRangeTo(spawn) > 3) utils.moveTo(creep, spawn, { range: 3 });
 }
 
+/* ------------------------------ 道路通畅维保员 ------------------------------ */
+
+const WALKABLE_TYPES = (function () {
+    const m = {};
+    m[STRUCTURE_ROAD] = true;
+    m[STRUCTURE_CONTAINER] = true;
+    m[STRUCTURE_RAMPART] = true;
+    return m;
+})();
+
+/** 关键节点：spawn / 容器 / 控制器 / 矿源 —— 四邻必须通畅 */
+function keyNodes(room) {
+    const nodes = [];
+    try { for (const s of room.find(FIND_MY_SPAWNS)) nodes.push(s.pos); } catch (e) { }
+    try {
+        for (const s of room.find(FIND_STRUCTURES)) {
+            if (s.structureType === STRUCTURE_CONTAINER) nodes.push(s.pos);
+        }
+    } catch (e) { }
+    if (room.controller) nodes.push(room.controller.pos);
+    try { for (const s of room.find(FIND_SOURCES)) nodes.push(s.pos); } catch (e) { }
+    return nodes;
+}
+
+/**
+ * 道路通畅维保员：定时巡检关键节点，四邻里只要有"可破坏的阻塞结构"就拆掉。
+ * 房间边界/地形墙不可破坏 -> 不管。
+ */
+function roadKeeper(creep, data) {
+    const room = creep.room;
+    const nodes = keyNodes(room);
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        for (let j = 0; j < dirs.length; j++) {
+            const x = node.x + dirs[j][0];
+            const y = node.y + dirs[j][1];
+            if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+            let found = [];
+            try { found = room.lookForAt(LOOK_STRUCTURES, x, y) || []; } catch (e) { found = []; }
+            if (!found.length) continue;
+            const st = found[0];
+            if (WALKABLE_TYPES[st.structureType]) continue;
+            if (st.structureType === STRUCTURE_SPAWN) continue;
+            utils.say(creep, '🚧');
+            const r = creep.dismantle(st);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
+            return;
+        }
+    }
+
+    utils.say(creep, '✅');
+    const sp = data.spawns && data.spawns[0];
+    if (sp && creep.pos.getRangeTo(sp) > 3) utils.moveTo(creep, sp, { range: 3 });
+}
+
 /* ------------------------------ 开拓者（新房间建设） ------------------------------ */
 
 /**
@@ -738,6 +795,7 @@ const BEHAVIORS = {
     scout: scout,
     recon: recon,
     pioneer: pioneer,
+    roadKeeper: roadKeeper,
     claimer: claimer,
     reserver: reserver,
     harvester: harvester,
@@ -748,8 +806,27 @@ const BEHAVIORS = {
     upgrader: upgrader,
 };
 
+function bumpDemolish(creep) {
+    creep.memory.demolishTicks = (creep.memory.demolishTicks || 0) + 1;
+    if (creep.memory.demolishTicks > 400) { creep.memory.demolish = undefined; creep.memory.demolishTicks = 0; }
+}
+
 function run(creep) {
     if (creep.spawning) return;
+
+    // 拆障（抢险用）：memory.demolish = {x,y}，拆掉那格结构，腾出路
+    if (creep.memory && creep.memory.demolish) {
+        const d = creep.memory.demolish;
+        let target = null;
+        const found = creep.room.lookForAt(LOOK_STRUCTURES, d.x, d.y);
+        if (found && found.length) target = found[0];
+        if (!target) { creep.memory.demolish = undefined; return; }
+        utils.say(creep, '🔨');
+        const r = creep.dismantle(target);
+        if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target);
+        else if (r === OK) bumpDemolish(creep);
+        return;
+    }
 
     // 待回收：回 spawn 换能量，把名额让给紧缺岗位
     if (creep.memory && creep.memory.recycle) {
