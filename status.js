@@ -77,15 +77,18 @@ function report() {
     }
 
     let army = 0;
+    let patrol = 0;
     for (const k in Game.creeps) {
-        if (Game.creeps[k].memory && Game.creeps[k].memory.role === 'soldier') army++;
+        const r = Game.creeps[k].memory && Game.creeps[k].memory.role;
+        if (r === 'soldier') army++;
+        else if (r === 'patroller') patrol++;
     }
 
     const errs = (Memory.fw && Memory.fw.errors) || [];
 
     lines.push('[FW] 总 creep ' + totalCreeps
         + ' | GCL ' + (Game.gcl ? Game.gcl.level : '?') + '(' + (Game.gcl ? Game.gcl.progress : 0) + '/' + (Game.gcl ? Game.gcl.progressTotal : 0) + ')'
-        + ' | 兵 ' + army
+        + ' | 兵 ' + army + '+' + patrol + '巡逻'
         + intelText
         + ' | 最优扩张 ' + bestTarget
         + (errs.length ? ' | 异常 ' + errs.length + ' 条(见 Memory.fw.errors)' : ' | 无异常'));

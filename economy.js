@@ -53,6 +53,14 @@ function runRoom(room) {
     const data = utils.roomData(room);
     defense.run(room, data);      // 塔 / 安全模式 / 逃跑 / 防御工事
     runLinks(room, data);         // RCL5+ 的 link 瞬移
+
+    // 记录"老家被袭"信号：巡逻兵看到就会立刻回防
+    if (data.hostiles && data.hostiles.length > 0) {
+        Memory.fw.homeUnderAttack = room.name;
+        Memory.fw.homeAttackAt = Game.time;
+    } else if (Memory.fw && Memory.fw.homeUnderAttack === room.name && Game.time - (Memory.fw.homeAttackAt || 0) > 50) {
+        Memory.fw.homeUnderAttack = undefined;
+    }
     rebalanceRoles(room, data);   // 容器体系建好后，把多余的自采工人转成矿工/搬运工
 
     // 诊断信息（每 50 tick 写一次 Memory，外部可读）
@@ -108,7 +116,7 @@ function canDo(creep, role) {
  */
 function rebalanceRoles(room, data) {
     const quota = computeQuota(room, data);
-    const have = n => data.creepsByRole[n] || 0;
+    const have = n => utils.countRole(data, n);
 
     // 每个角色不能被抽空的下限
     const floors = {
@@ -163,8 +171,12 @@ function rebalanceRoles(room, data) {
             creep.memory.role = d.role;
             creep.memory.working = undefined;
             creep.memory.noEnemySince = undefined;
-            data.creepsByRole[cur] = Math.max(0, have(cur) - 1);
-            data.creepsByRole[d.role] = have(d.role) + 1;
+            if (data.ownedByRole) {
+                data.ownedByRole[cur] = Math.max(0, (data.ownedByRole[cur] || 0) - 1);
+                data.ownedByRole[d.role] = (data.ownedByRole[d.role] || 0) + 1;
+            }
+            data.creepsByRole[cur] = Math.max(0, (data.creepsByRole[cur] || 0) - 1);
+            data.creepsByRole[d.role] = (data.creepsByRole[d.role] || 0) + 1;
             d.missing--;
             console.log('[FW] ' + creep.name + ' 转职 ' + cur + ' -> ' + d.role + '（岗位补位）');
         }
@@ -555,8 +567,8 @@ function computeQuota(room, data) {
 
     // 军事/侦查类兵种：只有经济已经转起来（至少 2 个经济单位、其中有采集者/矿工）才允许造，
     // 否则 130 能量的士兵会把这个房间的启动资金吃掉，直接锁死经济
-    const econCount = (data.creepsByRole.harvester || 0) + (data.creepsByRole.miner || 0) + (data.creepsByRole.hauler || 0);
-    const econHealthy = econCount >= 2 && ((data.creepsByRole.harvester || 0) + (data.creepsByRole.miner || 0)) >= 1;
+    const econCount = utils.countRole(data, 'harvester') + utils.countRole(data, 'miner') + utils.countRole(data, 'hauler');
+    const econHealthy = econCount >= 2 && (utils.countRole(data, 'harvester') + utils.countRole(data, 'miner')) >= 1;
 
     const militaryAllowed = (data.hostiles && data.hostiles.length > 0) || level >= 2;
     if (econHealthy && militaryAllowed) {
@@ -564,6 +576,10 @@ function computeQuota(room, data) {
         quota.soldier = data.hostiles && data.hostiles.length > 0
             ? Math.min(4, data.hostiles.length + 1)
             : 1;
+        // 边防巡逻队：RCL3 起常备 2 人，在相邻房间之间来回巡逻清野；受袭时加到 3
+        if (level >= 3) {
+            quota.patroller = (data.hostiles && data.hostiles.length > 0) ? 3 : 2;
+        }
         // 侦查兵：相邻房间情报缺失/过期时才派 1 个
         quota.scout = hasStaleNeighbor(room.name) ? config.maxScouts : 0;
     }
@@ -602,7 +618,8 @@ function computeQuota(room, data) {
     // 总人数上限：按"先砍谁最不痛"的顺序裁剪，保证矿工/建造者/升级者都还留得住人
     const cap = creepCap(room);
     let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader
-        + (quota.soldier || 0) + (quota.scout || 0) + (quota.remoteHarvester || 0) + (quota.reserver || 0);
+        + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0)
+        + (quota.remoteHarvester || 0) + (quota.reserver || 0);
     const floors = {
         harvester: 2,
         hauler: 1,
@@ -725,6 +742,7 @@ function runSpawns(room, data) {
 
     const quota = computeQuota(room, data);
     const wanted = pickSpawnRole(data, quota);
+    const ownedTotal = data.creeplist.length;
 
     // 总数上限：人太多会吃掉全部能量用于更新换代。
     // 但防御者属于应急，允许突破上限（不然房间里有敌人时没人能打）

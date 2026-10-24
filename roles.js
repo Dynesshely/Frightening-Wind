@@ -306,6 +306,155 @@ function soldier(creep, data) {
     if (creep.pos.getRangeTo(spawn) > 3) utils.moveTo(creep, spawn, { range: 3 });
 }
 
+/* ------------------------------ 边防巡逻队 ------------------------------ */
+
+function attackParts(creep) {
+    let n = 0;
+    for (const p of creep.body) {
+        if (p.type === ATTACK) n++;
+        else if (p.type === RANGED_ATTACK) n += 2;
+    }
+    return n;
+}
+
+/**
+ * 巡逻路线：相邻房间，优先"无主 + 矿源多"的（那些是我们准备占的地盘）
+ */
+function patrolRoute(home) {
+    if (!Memory.fw) Memory.fw = {};
+    const cached = Memory.fw.patrolRoute;
+    if (cached && Game.time - cached.t < 500 && cached.rooms && cached.rooms.length && cached.home === home) {
+        return cached.rooms;
+    }
+    let exits = {};
+    try {
+        exits = Game.map.describeExits(home) || {};
+    } catch (e) {
+        exits = {};
+    }
+    const rooms = [];
+    for (const dir in exits) {
+        const name = exits[dir];
+        if (!name || name === home) continue;
+        const info = utils.getIntel(name);
+        let score = 0;
+        if (info) {
+            if (info.controller && !info.controller.owner) score += 10;
+            score += Math.min(6, (info.sources || []).length * 3);
+            if (info.hostiles > 0) score += 5;   // 有敌人的更要去看看
+        }
+        rooms.push({ name: name, score: score });
+    }
+    rooms.sort((a, b) => b.score - a.score);
+    const list = rooms.slice(0, config.patrolRooms).map(r => r.name);
+    Memory.fw.patrolRoute = { t: Game.time, home: home, rooms: list };
+    return list;
+}
+
+/**
+ * 边防巡逻兵：
+ *  - 老家有敌人 -> 立刻回防
+ *  - 所在房间有敌人 -> 评估战力后交战（打不过就撤）
+ *  - 血量低 -> 回老家塔下治疗
+ *  - 否则按路线逐房间巡逻，每间驻留 patrolStayTicks 扫荡
+ */
+function patroller(creep, data) {
+    const home = creep.memory.home || creep.room.name;
+    const hostiles = data.hostiles || [];
+
+    // 1) 老家被袭：优先回防
+    const homeHostiles = (creep.room.name === home) ? hostiles : [];
+    if (creep.room.name !== home) {
+        const homeInfo = null;
+        // 用 Memory 里记录的"老家有敌人"信号（由 soldier / defense 写入）
+        if (Memory.fw && Memory.fw.homeUnderAttack && Memory.fw.homeUnderAttack === home) {
+            utils.say(creep, '🏠');
+            utils.moveToRoom(creep, home);
+            return;
+        }
+    }
+
+    // 2) 血量不健康：回老家塔下补血
+    if (creep.hits < creep.hitsMax * config.patrolHealRatio) {
+        utils.say(creep, '🩹');
+        if (creep.room.name !== home) {
+            utils.moveToRoom(creep, home);
+        } else if (data.spawns[0]) {
+            utils.moveTo(creep, data.spawns[0], { range: 3 });
+        }
+        return;
+    }
+
+    // 3) 当前房间有敌人：打
+    if (hostiles.length) {
+        let target = null;
+        let bestDist = 999;
+        for (const h of hostiles) {
+            const d = creep.pos.getRangeTo(h);
+            if (d < bestDist) { bestDist = d; target = h; }
+        }
+        if (target) {
+            const mine = attackParts(creep);
+            const theirs = attackParts(target);
+            // 打不过（对方火力是我们的 2 倍以上）就撤回老家，别送
+            if (theirs > mine * 2 + 1) {
+                utils.say(creep, '🏃');
+                if (creep.room.name !== home) utils.moveToRoom(creep, home);
+                else if (data.spawns[0]) utils.moveTo(creep, data.spawns[0], { range: 3 });
+                if (Memory.fw) Memory.fw.threatSeen = Game.time;
+                return;
+            }
+            utils.say(creep, '⚔');
+            const r = creep.attack(target);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target);
+            if (Memory.fw) Memory.fw.threatSeen = Game.time;
+            return;
+        }
+    }
+
+    const route = patrolRoute(home);
+    if (!route.length) {
+        // 没有相邻房间可巡逻：在老家门口待命
+        if (data.spawns[0] && creep.pos.getRangeTo(data.spawns[0]) > 3) {
+            utils.moveTo(creep, data.spawns[0], { range: 3 });
+        }
+        return;
+    }
+
+    // 4) 巡逻推进
+    const idx = creep.memory.patrolIndex === undefined ? 0 : creep.memory.patrolIndex;
+    const targetRoom = route[idx % route.length];
+
+    if (creep.room.name !== targetRoom) {
+        // 路上顺手清掉当前房间的敌人（上面已处理）；没敌人就去目标房间
+        utils.say(creep, '➡');
+        utils.moveToRoom(creep, targetRoom);
+        if (creep.memory.patrolEntered !== creep.room.name) {
+            creep.memory.patrolEntered = creep.room.name;
+            creep.memory.patrolSince = Game.time;
+        }
+        return;
+    }
+
+    // 已在目标房间：驻留扫荡
+    creep.memory.patrolSince = creep.memory.patrolSince || Game.time;
+    if (Game.time - creep.memory.patrolSince < config.patrolStayTicks) {
+        utils.say(creep, '👁');
+        // 往房间中心/另一侧走，扩大视野
+        const cx = 25, cy = 25;
+        if (creep.pos.getRangeTo(new RoomPosition(cx, cy, creep.room.name)) > 5) {
+            try { creep.moveTo(new RoomPosition(cx, cy, creep.room.name), { reusePath: 10 }); } catch (e) { }
+        }
+        return;
+    }
+
+    // 驻留结束：去下一个房间
+    creep.memory.patrolIndex = (idx + 1) % route.length;
+    creep.memory.patrolSince = Game.time;
+    creep.memory.patrolEntered = undefined;
+    utils.moveToRoom(creep, route[creep.memory.patrolIndex]);
+}
+
 /* ------------------------------ 侦查兵 ------------------------------ */
 
 /**
@@ -385,6 +534,7 @@ function scout(creep, data) {
 
 const BEHAVIORS = {
     soldier: soldier,
+    patroller: patroller,
     scout: scout,
     reserver: reserver,
     harvester: harvester,
@@ -408,4 +558,4 @@ function run(creep) {
     fn(creep, data);
 }
 
-module.exports = { run, pickScoutTarget };
+module.exports = { run, pickScoutTarget, patrolRoute };

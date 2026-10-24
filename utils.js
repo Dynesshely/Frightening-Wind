@@ -66,6 +66,14 @@ function roomData(room) {
 
     // 按角色统计本房 creep；顺带记录"快死了的"和"正在孵化的"
     d.creepsByRole = {};
+    d.ownedByRole = {};
+    // 归属本房间的 creep（包含正在外地巡逻/侦查/采矿的），用于配额判断
+    for (const name in Game.creeps) {
+        const c = Game.creeps[name];
+        if (!c.memory || c.memory.home !== room.name) continue;
+        const r = c.memory.role || 'unknown';
+        d.ownedByRole[r] = (d.ownedByRole[r] || 0) + 1;
+    }
     d.leavingByRole = {};
     d.spawningByRole = {};
     for (const c of d.creeplist) {
@@ -735,6 +743,8 @@ function inferRole(creep) {
 }
 
 function countRole(data, role) {
+    // 优先用"归属本房"的全局统计（跨房间单位也算）
+    if (data.ownedByRole) return data.ownedByRole[role] || 0;
     return data.creepsByRole[role] || 0;
 }
 
