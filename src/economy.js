@@ -59,7 +59,12 @@ function tagSpawns(rooms) {
     if (!Memory.fw.spawnStat) Memory.fw.spawnStat = { busy: 0, total: 0, t: Game.time };
     const SS = Memory.fw.spawnStat;
     SS.total++;
-    for (const sp of (room.find(FIND_MY_SPAWNS) || [])) if (sp.spawning) { SS.busy++; break; }
+    let anyBusy = false;
+    for (const r of rooms) {
+        if (anyBusy) break;
+        for (const sp of (r.find(FIND_MY_SPAWNS) || [])) { if (sp.spawning) { anyBusy = true; break; } }
+    }
+    if (anyBusy) SS.busy++;
     if (Game.time - SS.t >= 50) {
         Memory.fw.spawnUsage = { t: Game.time, ratio: SS.total ? (SS.busy / SS.total) : 0 };
         SS.busy = 0; SS.total = 0; SS.t = Game.time;
