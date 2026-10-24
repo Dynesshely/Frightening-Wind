@@ -465,7 +465,21 @@ function clearFleeMemory(creep) {
 function fleeIfNeeded(room, data) {
     const result = { fleeing: 0, started: 0 };
     const creeps = (data && data.creeplist) || [];
-    const hostiles = (data && data.hostiles) || [];
+    const allHostiles = (data && data.hostiles) || [];
+
+    // 只有"带 ATTACK/RANGED_ATTACK 的敌人"才需要逃。
+    // 纯 WORK 的拆家兵对 creep 没有任何威胁——为它停工是纯亏（线上就踩过这个坑）。
+    const hostiles = [];
+    for (let i = 0; i < allHostiles.length; i++) {
+        const h = allHostiles[i];
+        if (!h || !h.body) continue;
+        let dangerous = false;
+        for (let j = 0; j < h.body.length; j++) {
+            const t = h.body[j].type;
+            if (t === ATTACK || t === RANGED_ATTACK) { dangerous = true; break; }
+        }
+        if (dangerous) hostiles.push(h);
+    }
     if (!creeps.length) return result;
 
     const now = gameTime();
