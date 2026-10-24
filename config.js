@@ -36,10 +36,12 @@ module.exports = {
         upgrader: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
         // 道路通畅维保员：WORK(拆障) + CARRY(收废料) + MOVE
         roadKeeper: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 4, maxCost: 400 },
-        // 远程接驳工：纯搬运，载重堆满
-        remoteHauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10 },
-        // 远程采集者：和本地采集者同款（要能挖能背）
-        remoteHarvester: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 5 },
+        // 远程接驳工：纯搬运（远距离 => 限价 500，走高密度路线）
+        remoteHauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10, maxCost: 500 },
+        // 护航兵：ATTACK+MOVE，跟着远程采集队走
+        escort: { unit: ['attack', 'move'], filler: ['attack', 'move'], maxUnits: 5, maxCost: 400 },
+        // 远程采集者：远距离 => 限价 450（模型结论：>40 格堆身体无效，靠密度）
+        remoteHarvester: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 5, maxCost: 450 },
         // 占领者：CLAIM + MOVE，去相邻房间预定控制器（CLAIM 600 能量，所以只造 1 个）
         reserver: { unit: ['claim', 'move'], filler: [], maxUnits: 1, maxCost: 650 },
         // 占领者（真正占房）：同样是 CLAIM + MOVE，但执行 claimController

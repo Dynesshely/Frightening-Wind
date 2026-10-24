@@ -562,6 +562,55 @@ function pioneer(creep, data) {
     utils.upgradeController(creep, creep.room);
 }
 
+/* ------------------------------ 护航兵 ------------------------------ */
+
+/**
+ * 护航兵：跟着远程采集/接驳单位跑，遇敌就打，没敌就贴身保护。
+ * 远程采矿最怕的就是路上被 harass 兵点掉，所以护航走"贴身"而不是"巡逻"。
+ */
+function escort(creep, data) {
+    // 本地有敌人优先
+    if (data.hostiles && data.hostiles.length) {
+        const t = creep.pos.findClosestByRange(data.hostiles);
+        if (t) {
+            utils.say(creep, '⚔');
+            const r = creep.attack(t);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, t);
+            return;
+        }
+    }
+
+    // 找到要护送的同伴（同老家的远程单位）
+    let ward = null;
+    let bestD = 9999;
+    for (const n in Game.creeps) {
+        const c = Game.creeps[n];
+        if (!c.memory || !c.memory.home) continue;
+        if (c.memory.role !== 'remoteHarvester' && c.memory.role !== 'remoteHauler') continue;
+        if (c.memory.home !== creep.memory.home) continue;
+        const dd = creep.pos.getRangeTo(c);
+        if (creep.room.name === c.room.name && dd < bestD) { bestD = dd; ward = c; }
+        else if (!ward) ward = c;
+    }
+    if (!ward) {
+        // 没有远程单位：回防老家
+        const sp = data.spawns[0];
+        if (sp && creep.pos.getRangeTo(sp) > 4) utils.moveTo(creep, sp, { range: 4 });
+        return;
+    }
+    if (creep.room.name !== ward.room.name) {
+        utils.say(creep, '➡');
+        utils.moveToRoom(creep, ward.room.name);
+        return;
+    }
+    if (creep.pos.getRangeTo(ward) > 3) {
+        utils.say(creep, '🛡');
+        utils.moveTo(creep, ward);
+    } else {
+        utils.say(creep, '🛡');
+    }
+}
+
 /* ------------------------------ 侦察兵（敌区情报） ------------------------------ */
 
 /**
@@ -892,6 +941,7 @@ const BEHAVIORS = {
     harvester: harvester,
     remoteHarvester: remoteHarvester,
     remoteHauler: remoteHauler,
+    escort: escort,
     miner: miner,
     hauler: hauler,
     builder: builder,

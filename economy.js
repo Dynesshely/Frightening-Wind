@@ -901,6 +901,12 @@ function computeQuota(room, data) {
     quota.roadKeeper = 0;
     if (level >= 2 && data.spawns.length > 0) quota.roadKeeper = 1;
 
+    // 护航军：远程采集队成规模后 1~2 人贴身护航
+    quota.escort = 0;
+    if ((quota.remoteHarvester || 0) > 0 && utils.countRole(data, 'remoteHarvester') >= 2) {
+        quota.escort = Math.min(2, Math.floor(utils.countRole(data, 'remoteHarvester') / 2));
+    }
+
     // 远程接驳工：有远程矿工时配 1 个（只跑"远程容器 -> 老家"这一段）
     quota.remoteHauler = 0;
     if ((quota.remoteHarvester || 0) > 0 && utils.countRole(data, 'remoteHarvester') >= 2) {
@@ -939,7 +945,8 @@ function computeQuota(room, data) {
     let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader
         + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0) + (quota.recon || 0)
         + (quota.remoteHarvester || 0) + (quota.reserver || 0)
-        + (quota.claimer || 0) + (quota.pioneer || 0) + (quota.roadKeeper || 0) + (quota.remoteHauler || 0);
+        + (quota.claimer || 0) + (quota.pioneer || 0) + (quota.roadKeeper || 0)
+        + (quota.remoteHauler || 0) + (quota.escort || 0);
     const floors = {
         // 增长引擎保底：矿工不砍、升级者/建造者各留 2、搬运 1、守卫各 1
         miner: quota.miner || 0,
