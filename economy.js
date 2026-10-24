@@ -572,9 +572,10 @@ function computeQuota(room, data) {
     // RCL2~4: 4 个；RCL5+: 5 个（再高由下面的"库存自适应"继续加）
     quota.upgrader = containerized > 0 ? (level >= 5 ? 5 : 4) : 0;
 
-    // 占领者：RCL4+ 才有余粮养（650 能量的 CLAIM 单位），目标是相邻的优质空地
+    // 占领者：RCL3+ 就派（650 能量的 CLAIM 单位，相对 16 E/tick 的收入只是 3%）。
+    // 服务器上有其他玩家/机器人在活动，先把相邻的优质空地"预定"住比省这 650 更划算。
     quota.reserver = 0;
-    if (level >= 4 && (data.creepsByRole.reserver || 0) === 0) {
+    if (level >= 3 && (data.creepsByRole.reserver || 0) === 0) {
         const target = pickReserveTarget(room);
         if (target) quota.reserver = 1;
     }
@@ -594,7 +595,7 @@ function computeQuota(room, data) {
 
     // 远程采矿：只有"本地已经饱和"才派——两个矿源都有容器、没工地、RCL3+、人数够
     quota.remoteHarvester = 0;
-    if (level >= 3 && containerized >= 2 && data.sites.length === 0 && data.creeplist.length >= 8) {
+    if (level >= 3 && containerized >= 2 && data.creeplist.length >= 9) {
         quota.remoteHarvester = 2;
     }
 
