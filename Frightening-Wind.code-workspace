@@ -1,0 +1,13 @@
+{ "name": "Frightening-Wind",
+  "folders": [
+    { "name": "Frightening-Wind",
+      "path": "."
+    },
+    { "name": "Frightening-Wind",
+      "path": ".git"
+    }
+  ],
+  "settings": { "name": "Frightening-Wind",
+    "git.autorefresh": true
+  }
+}

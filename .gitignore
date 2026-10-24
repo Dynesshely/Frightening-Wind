@@ -1,0 +1,21 @@
+# ---- Screeps 同步脚本（含本机绝对路径，不入库）----
+tools/
+!tools/deploy.example.ps1
+
+# ---- 依赖与缓存 ----
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 日志与临时产物 ----
+*.log
+*.tmp
+.dsh-tmp/
