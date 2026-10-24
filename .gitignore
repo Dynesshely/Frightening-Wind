@@ -1,5 +1,5 @@
 # ---- Screeps 同步脚本（含本机绝对路径，不入库）----
-tools/
+tools/*
 !tools/deploy.example.ps1
 
 # ---- 依赖与缓存 ----
