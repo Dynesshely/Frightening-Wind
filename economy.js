@@ -923,7 +923,7 @@ function hasStaleNeighbor(roomName) {
 }
 
 function creepCap(room) {
-    return 8 + Math.floor((room.energyCapacityAvailable || 300) / 100);
+    return 9 + Math.floor((room.energyCapacityAvailable || 300) / 100);
 }
 
 function runSpawns(room, data) {
