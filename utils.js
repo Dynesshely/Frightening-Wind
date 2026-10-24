@@ -330,6 +330,61 @@ function harvestSlots(source) {
     return slots;
 }
 
+/** 矿源 8 邻格里"可站人"的格子列表 */
+function slotList(source) {
+    const room = source.room;
+    if (!room) return [];
+    const terrain = room.getTerrain();
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const x = source.pos.x + dx;
+            const y = source.pos.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+            let blocked = false;
+            try {
+                for (const s of room.lookForAt(LOOK_STRUCTURES, x, y)) {
+                    if (s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_CONTAINER && s.structureType !== STRUCTURE_RAMPART) blocked = true;
+                }
+            } catch (e) { }
+            if (!blocked) out.push({ x: x, y: y });
+        }
+    }
+    return out;
+}
+
+/**
+ * 给矿工分配一个"独占站位"：同一矿源的矿工各站一格，永不抢位。
+ * 站位表存在 Memory.fw.slotOf[sourceId] = { "x,y": creepName }
+ */
+function ensureSlot(creep, source) {
+    if (!Memory.fw) Memory.fw = {};
+    if (!Memory.fw.slotOf) Memory.fw.slotOf = {};
+    const key = source.id;
+    const table = Memory.fw.slotOf[key] || (Memory.fw.slotOf[key] = {});
+    const slots = slotList(source);
+    if (!slots.length) return null;
+
+    // 已经占好且仍然有效
+    if (creep.memory.mineSlot) {
+        const k = creep.memory.mineSlot.x + ',' + creep.memory.mineSlot.y;
+        if (table[k] === creep.name || table[k] === undefined) { table[k] = creep.name; return creep.memory.mineSlot; }
+        creep.memory.mineSlot = undefined;
+    }
+    // 找一格没被活人占的
+    for (const s of slots) {
+        const k = s.x + ',' + s.y;
+        const owner = table[k];
+        if (owner && Game.creeps[owner]) continue;
+        table[k] = creep.name;
+        creep.memory.mineSlot = { x: s.x, y: s.y };
+        return creep.memory.mineSlot;
+    }
+    return slots[0];
+}
+
 /* ------------------------------ 采集 ------------------------------ */
 
 /**
@@ -812,6 +867,8 @@ module.exports = {
     intel,
     expansionCandidates,
     harvestSlots,
+    slotList,
+    ensureSlot,
     inferRole,
     countRole,
 };

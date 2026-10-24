@@ -51,6 +51,15 @@ function miner(creep, data) {
 
     if (!utils.isWorking(creep)) {
         utils.say(creep, '⛏');
+        // 站到自己的专属站位格上，再采集（同一矿源的矿工各站一格，不排队）
+        const slot = utils.ensureSlot(creep, source);
+        if (slot) {
+            const rp = new RoomPosition(slot.x, slot.y, creep.room.name);
+            if (creep.pos.getRangeTo(rp) > 0) {
+                utils.moveTo(creep, rp);
+                if (creep.pos.getRangeTo(source.pos) > 1) return;
+            }
+        }
         const hr = creep.harvest(source);
         if (hr === ERR_NOT_IN_RANGE) utils.moveTo(creep, source);
         return;
@@ -214,6 +223,21 @@ function remoteHarvester(creep, data) {
         return;
     }
 
+    // 满载：如果远程房间里有容器 -> 就地倒进去（自己不再跑长途，交给接驳工）
+    const src = creep.memory.sourceId ? Game.getObjectById(creep.memory.sourceId) : null;
+    if (creep.room.name === targetRoom) {
+        let box = null;
+        try {
+            for (const s of creep.room.find(FIND_STRUCTURES)) {
+                if (s.structureType === STRUCTURE_CONTAINER && (!src || s.pos.getRangeTo(src.pos) <= 2)) { box = s; break; }
+            }
+        } catch (e) { }
+        if (box) {
+            utils.transferTo(creep, box);
+            return;
+        }
+    }
+
     if (creep.room.name !== home) {
         utils.say(creep, '🏠');
         utils.moveToRoom(creep, home);
@@ -222,7 +246,37 @@ function remoteHarvester(creep, data) {
 
     if (utils.deliverEnergy(creep, data)) return;
     if (utils.dumpSurplus(creep, data)) return;
-    // 实在没地方放：在 spawn 附近等，别乱跑
+    if (data.spawns[0]) utils.moveTo(creep, data.spawns[0], { range: 2 });
+}
+
+/* ------------------------------ 远程接驳工 ------------------------------ */
+
+/**
+ * 远程接驳工：只负责"远程容器 -> 老家"这一段短途批量运输。
+ * 和远程矿工配合，把原来的"矿工自己跑 70 格"拆成"矿工站定 + 接驳工批量搬"。
+ */
+function remoteHauler(creep, data) {
+    const home = creep.memory.home || creep.room.name;
+    const target = creep.memory.targetRoom;
+    if (!target) return;
+
+    if (!utils.isWorking(creep)) {
+        // 去远程房间取货
+        if (creep.room.name !== target) { utils.moveToRoom(creep, target); return; }
+        let box = null;
+        try {
+            for (const s of creep.room.find(FIND_STRUCTURES)) {
+                if (s.structureType === STRUCTURE_CONTAINER && (s.store.getUsedCapacity(RESOURCE_ENERGY) || 0) >= 50) { box = s; break; }
+            }
+        } catch (e) { }
+        if (box) { utils.transferFrom(creep, box); return; }
+        utils.say(creep, '💤');
+        return;
+    }
+
+    if (creep.room.name !== home) { utils.say(creep, '🏠'); utils.moveToRoom(creep, home); return; }
+    if (utils.deliverEnergy(creep, data)) return;
+    if (utils.dumpSurplus(creep, data)) return;
     if (data.spawns[0]) utils.moveTo(creep, data.spawns[0], { range: 2 });
 }
 
@@ -837,6 +891,7 @@ const BEHAVIORS = {
     reserver: reserver,
     harvester: harvester,
     remoteHarvester: remoteHarvester,
+    remoteHauler: remoteHauler,
     miner: miner,
     hauler: hauler,
     builder: builder,

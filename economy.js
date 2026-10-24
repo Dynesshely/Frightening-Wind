@@ -893,12 +893,19 @@ function computeQuota(room, data) {
     // 远程采矿：只有"本地已经饱和"才派——两个矿源都有容器、没工地、RCL3+、人数够
     quota.remoteHarvester = 0;
     if (level >= 3 && containerized >= 2 && (utils.countRole(data, 'miner') >= 2)) {
-        quota.remoteHarvester = capacity >= 1300 ? 3 : 2;
+        // 远程采矿队：本地饱和后尽量往外扩
+        quota.remoteHarvester = capacity >= 1300 ? 4 : (capacity >= 800 ? 3 : 2);
     }
 
     // 道路通畅维保员：常备 1 人（RCL2+），关键节点被堵就拆
     quota.roadKeeper = 0;
     if (level >= 2 && data.spawns.length > 0) quota.roadKeeper = 1;
+
+    // 远程接驳工：有远程矿工时配 1 个（只跑"远程容器 -> 老家"这一段）
+    quota.remoteHauler = 0;
+    if ((quota.remoteHarvester || 0) > 0 && utils.countRole(data, 'remoteHarvester') >= 2) {
+        quota.remoteHauler = 1;
+    }
 
     // 扩张：① 已占但没 spawn 的房间 -> 派开拓者；② GCL 允许 -> 派占房者
     quota.claimer = 0;
@@ -932,7 +939,7 @@ function computeQuota(room, data) {
     let total = quota.harvester + quota.miner + quota.hauler + quota.builder + quota.upgrader
         + (quota.soldier || 0) + (quota.patroller || 0) + (quota.scout || 0) + (quota.recon || 0)
         + (quota.remoteHarvester || 0) + (quota.reserver || 0)
-        + (quota.claimer || 0) + (quota.pioneer || 0) + (quota.roadKeeper || 0);
+        + (quota.claimer || 0) + (quota.pioneer || 0) + (quota.roadKeeper || 0) + (quota.remoteHauler || 0);
     const floors = {
         // 增长引擎保底：矿工不砍、升级者/建造者各留 2、搬运 1、守卫各 1
         miner: quota.miner || 0,
@@ -1096,7 +1103,8 @@ function hasStaleNeighbor(roomName) {
 }
 
 function creepCap(room) {
-    return 9 + Math.floor((room.energyCapacityAvailable || 300) / 100);
+    // 扩编：给采矿队/护航队腾空间
+    return 12 + Math.floor((room.energyCapacityAvailable || 300) / 100);
 }
 
 function runSpawns(room, data) {
