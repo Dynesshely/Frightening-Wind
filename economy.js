@@ -343,6 +343,54 @@ function createSite(room, spot, type, label) {
     return 0;
 }
 
+/**
+ * 地形感知的"不封路"校验。
+ * 在 spawn 周围 11x11 的窗口里，把"地形墙 + 已有结构/工地 + 待放位置"都当障碍，
+ * 从 spawn 做一次洪水填充；如果放上去之后 spawn 能到达的窗口边界格少于 6 个，就判定会封路。
+ * 这样地形墙本身挡住的方向不算数，只有"本来能走、却被建筑堵死"才算问题。
+ */
+function wouldBlockAccess(room, occ, spot, center) {
+    const R = 5;
+    const terrain = room.getTerrain();
+    const blocked = {};
+    const key = (x, y) => x + ',' + y;
+
+    for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+            const x = center.x + dx;
+            const y = center.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) { blocked[key(x, y)] = true; continue; }
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) blocked[key(x, y)] = true;
+            else if (occ[key(x, y)]) blocked[key(x, y)] = true;
+        }
+    }
+    blocked[key(spot.x, spot.y)] = true;
+    blocked[key(center.x, center.y)] = false;   // spawn 自己所在格是起点
+
+    // BFS
+    const seen = {};
+    const queue = [[center.x, center.y]];
+    seen[key(center.x, center.y)] = true;
+    let borderReached = 0;
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    while (queue.length) {
+        const cur = queue.shift();
+        const cx = cur[0];
+        const cy = cur[1];
+        if (Math.abs(cx - center.x) === R || Math.abs(cy - center.y) === R) borderReached++;
+        for (const d of dirs) {
+            const nx = cx + d[0];
+            const ny = cy + d[1];
+            const k = key(nx, ny);
+            if (seen[k] || blocked[k]) continue;
+            if (nx < 1 || nx > 48 || ny < 1 || ny > 48) continue;
+            seen[k] = true;
+            queue.push([nx, ny]);
+        }
+    }
+    return borderReached < 6;
+}
+
 function planConstruction(room, data) {
     const level = data.level;
     if (!level) return;
@@ -416,7 +464,12 @@ function planConstruction(room, data) {
     while (extTotal < extLimit && created < config.maxNewSitesPerTick && siteCount() < siteLimit) {
         const spots = freeSpots(room, occ, center.x, center.y, 2, 8, highway);
         if (!spots.length) break;
-        const spot = spots[0];
+        // 逐个候选做连通性校验：会封路就跳过（地形墙方向不算，可走方向必须留够）
+        let spot = null;
+        for (const cand of spots) {
+            if (!wouldBlockAccess(room, occ, cand, center)) { spot = cand; break; }
+        }
+        if (!spot) break;
         if (createSite(room, spot, STRUCTURE_EXTENSION)) {
             occ[spot.x + ',' + spot.y] = true;
             created++;
