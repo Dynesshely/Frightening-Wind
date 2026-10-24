@@ -54,6 +54,15 @@ function runRoom(room) {
     defense.run(room, data);      // 塔 / 安全模式 / 逃跑 / 防御工事
     runLinks(room, data);         // RCL5+ 的 link 瞬移
 
+    // 记录最近一次敌人的方位（塔防选址按"来敌方向"布防）
+    if (data.hostiles && data.hostiles.length > 0) {
+        let nearest = data.hostiles[0];
+        for (const h of data.hostiles) {
+            if (data.spawns[0] && h.pos.getRangeTo(data.spawns[0]) < nearest.pos.getRangeTo(data.spawns[0])) nearest = h;
+        }
+        Memory.fw.lastHostile = { x: nearest.pos.x, y: nearest.pos.y, t: Game.time };
+    }
+
     // 记录"老家被袭"信号：巡逻兵看到就会立刻回防
     if (data.hostiles && data.hostiles.length > 0) {
         Memory.fw.homeUnderAttack = room.name;
@@ -369,13 +378,13 @@ function planConstruction(room, data) {
         } else break;
     }
 
-    // 4) 塔（RCL3+）
+    // 4) 塔（RCL3+）：按"来敌方向"摆在边境 8~12 格处
     const towerLimit = config.towerLimit[level] || 0;
     let towerTotal = data.towers.length + countSites(data, STRUCTURE_TOWER);
     if (towerTotal < towerLimit && created < config.maxNewSitesPerTick) {
-        const spots = freeSpots(room, occ, center.x, center.y, 2, 6, avoid);
-        if (spots.length && createSite(room, spots[0], STRUCTURE_TOWER)) {
-            occ[spots[0].x + ',' + spots[0].y] = true;
+        const spot = pickTowerSpot(room, data, occ, towerTotal);
+        if (spot && createSite(room, spot, STRUCTURE_TOWER, 'border-defense')) {
+            occ[spot.x + ',' + spot.y] = true;
             created++;
             towerTotal++;
         }
@@ -403,10 +412,139 @@ function planConstruction(room, data) {
         }
     }
 
+    // 5.8) 边境工事（RCL4+，且当前工地不多时才做）：威胁方向的出口铺 rampart
+    if (level >= 4 && created < config.maxNewSitesPerTick && siteCount() < 2) {
+        planBorderRamparts(room, data, occ, created);
+    }
+
     // 6) 道路：只铺主要通勤路径上的沼泽段（平地本来就能满速走，铺路是浪费）
     if (level >= 2 && created < config.maxNewSitesPerTick) {
         planRoads(room, data, occ, created);
     }
+}
+
+/**
+ * 边境 rampart：在"来敌方向"的出口格上铺 rampart。
+ * 自己的 creep 可以在自己的 rampart 上通行，敌对 creep 必须先把 rampart 打穿，
+ * 所以这是最划算的边境封锁方式。总量控制得很小（<=10 格），不跟扩展开工抢资源。
+ */
+function planBorderRamparts(room, data, occ, createdBudget) {
+    const spawn = data.spawns[0];
+    if (!spawn) return;
+
+    let existing = 0;
+    for (const w of (data.walls || [])) if (w.structureType === STRUCTURE_RAMPART) existing++;
+    for (const s of data.sites) if (s.structureType === STRUCTURE_RAMPART) existing++;
+    if (existing >= 10) return;
+
+    // 与塔一致的威胁方向
+    const dirs = [
+        { d: 1, dx: 0, dy: -1 },
+        { d: 3, dx: 1, dy: 0 },
+        { d: 5, dx: 0, dy: 1 },
+        { d: 7, dx: -1, dy: 0 },
+    ];
+    const last = Memory.fw && Memory.fw.lastHostile;
+    const sx = spawn.pos.x;
+    const sy = spawn.pos.y;
+    let best = dirs[0];
+    let bestScore = -1;
+    for (const dir of dirs) {
+        let score = 0;
+        if (last && (Game.time - last.t) < 3000) {
+            const vx = last.x - sx;
+            const vy = last.y - sy;
+            if (dir.dx !== 0 && Math.sign(vx) === dir.dx && Math.abs(vx) > Math.abs(vy)) score += 6;
+            if (dir.dy !== 0 && Math.sign(vy) === dir.dy && Math.abs(vy) > Math.abs(vx)) score += 6;
+        }
+        if (room.controller) {
+            const cx = room.controller.pos.x - sx;
+            const cy = room.controller.pos.y - sy;
+            if (dir.dx !== 0 && Math.sign(cx) === dir.dx) score += 1;
+            if (dir.dy !== 0 && Math.sign(cy) === dir.dy) score += 1;
+        }
+        if (score > bestScore) { bestScore = score; best = dir; }
+    }
+    if (bestScore <= 0) return;   // 没有明确威胁方向就先不铺
+
+    const terrain = room.getTerrain();
+    // 该方向的出口格（房间边缘），取离 spawn 最近的几格
+    const candidates = [];
+    for (let i = 3; i < 47; i++) {
+        let x = sx;
+        let y = sy;
+        if (best.dx !== 0) { x = best.dx > 0 ? 48 : 1; y = i; }
+        else { y = best.dy > 0 ? 48 : 1; x = i; }
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        if (occ[x + ',' + y]) continue;
+        candidates.push({ x: x, y: y, d: Math.abs(x - sx) + Math.abs(y - sy) });
+    }
+    candidates.sort((a, b) => a.d - b.d);
+    for (const c of candidates) {
+        if (createdBudget >= config.maxNewSitesPerTick) return;
+        if (existing >= 10) return;
+        if (room.createConstructionSite(c.x, c.y, STRUCTURE_RAMPART) === OK) {
+            occ[c.x + ',' + c.y] = true;
+            createdBudget++;
+            existing++;
+            console.log('[FW] ' + room.name + ' 边境 rampart @' + c.x + ',' + c.y);
+        }
+    }
+}
+
+/**
+ * 塔防选址：边境防御思路——把塔摆在"来敌方向"上，离 spawn 8~12 格。
+ * 单塔时覆盖基地+卡住主要来路；多塔时按威胁优先级覆盖不同方向。
+ */
+function pickTowerSpot(room, data, occ, towerIndex) {
+    const spawn = data.spawns[0];
+    if (!spawn) return null;
+    const sx = spawn.pos.x;
+    const sy = spawn.pos.y;
+
+    // 四个方向：1=北(0,-1) 3=东(1,0) 5=南(0,1) 7=西(-1,0)
+    const dirs = [
+        { d: 1, dx: 0, dy: -1 },
+        { d: 3, dx: 1, dy: 0 },
+        { d: 5, dx: 0, dy: 1 },
+        { d: 7, dx: -1, dy: 0 },
+    ];
+
+    let exits = {};
+    try {
+        exits = Game.map.describeExits(room.name) || {};
+    } catch (e) {
+        exits = {};
+    }
+
+    // 打分：最近敌人在这个方向 +6；有出口 +3；控制器在这个方向 +2
+    const last = Memory.fw && Memory.fw.lastHostile;
+    for (const dir of dirs) {
+        let score = 0;
+        if (exits[dir.d]) score += 3;
+        if (last && (Game.time - last.t) < 3000) {
+            const vx = last.x - sx;
+            const vy = last.y - sy;
+            if (dir.dx !== 0 && Math.sign(vx) === dir.dx && Math.abs(vx) > Math.abs(vy)) score += 6;
+            if (dir.dy !== 0 && Math.sign(vy) === dir.dy && Math.abs(vy) > Math.abs(vx)) score += 6;
+        }
+        if (room.controller) {
+            const cx = room.controller.pos.x - sx;
+            const cy = room.controller.pos.y - sy;
+            if (dir.dx !== 0 && Math.sign(cx) === dir.dx) score += 2;
+            if (dir.dy !== 0 && Math.sign(cy) === dir.dy) score += 2;
+        }
+        dir.score = score;
+    }
+    dirs.sort((a, b) => b.score - a.score);
+
+    const dir = dirs[towerIndex % dirs.length];
+    // 在 spawn 沿该方向 8~12 格的范围内找空位
+    const cx = sx + dir.dx * 10;
+    const cy = sy + dir.dy * 10;
+    const spots = freeSpots(room, occ, cx, cy, 0, 4, []);
+    if (spots.length) return { x: spots[0].x, y: spots[0].y, dir: dir.d };
+    return null;
 }
 
 /**
