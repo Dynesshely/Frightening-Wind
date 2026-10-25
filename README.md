@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-MIT-A8B5A2?style=flat-square)](LICENSE)
 [![Screeps](https://img.shields.io/badge/Screeps-World-8E9AAF?style=flat-square)](https://screeps.com)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6-C9ADA7?style=flat-square)](src/)
-[![Tests](https://img.shields.io/badge/tests-33%20passing-9A8C98?style=flat-square)](#-测试)
+[![Tests](https://img.shields.io/badge/tests-all%20green-9A8C98?style=flat-square)](#-测试)
 [![Status](https://img.shields.io/badge/status-active-D4C7B0?style=flat-square)](#-roadmap)
 [![PRs](https://img.shields.io/badge/PRs-welcome-B7B7A4?style=flat-square)](#-贡献)
 
@@ -84,17 +84,31 @@ Frightening-Wind 是一个为 [Screeps World](https://screeps.com) 编写的**�
 
 ## 🏗 架构
 
-| 模块 | 行数 | 职责 |
-|---|---:|---|
-| `src/main.js` | 43 | 入口编排：房间循环 → 角色分发 → 全局收尾 |
-| `src/config.js` | 96 | 全部参数：兵种、配额、阈值、优先级 |
-| `src/economy.js` | 1130 | 清理、建造规划、配额裁剪、孵化、扩张、遥测 |
-| `src/roles.js` | 900 | 17 种角色的行为实现 |
-| `src/utils.js` | 860 | 每 tick 房间快照、能量链、站位、连通性、情报 |
-| `src/defense.js` | 748 | 塔、安全模式、撤退、工事规划 |
-| `src/status.js` | 154 | 控制台报告与遥测快照 |
+分层 + 门面。原先的巨石文件（`utils` 725 行、`defense` 748 行、`roles.military` 554 行、
+`roles` 485 行、`economy` 483 行）已按职责拆成**一模块一职责**；对外入口用门面保留旧键名，
+调用点一行未改、行为不变。完整说明见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
 
-**分层约束**：`main → economy → roles/utils`，单向依赖，无循环引用；参数一律走 `config.js`。
+| 层级 | 模块 | 职责 |
+|---|---|---|
+| 入口 | `main.js` · `status.js` | 循环编排与异常隔离 · 控制台报告与遥测快照 |
+| 编排 | `economy.js`（门面）· `mgr.room` · `mgr.spawn` · `mgr.roster` · `quota` · `construction` · `war` | 房间编排骨架 · 房间侧记账与诊断 · 孵化 · 人口重排 · 配额 · 建造规划 · 战争 |
+| 角色 | `roles.js`（门面）· `role.harvester` `miner` `hauler` `builder` `upgrader` `remote` `reserve` `tidy` | 经济角色行为，一个角色一个文件 |
+| 角色 | `roles.military.js`（门面）· `role.soldier` `patrol` `scout` `recon` `pioneer` | 军事与扩张角色 |
+| 角色 | `defense.js`（门面）· `mgr.tower` · `mgr.wall` · `mgr.flee` | 防御执行：塔火控 · 工事规划 · 撤退 |
+| 门面 | `utils.js` | 历史导出聚合，只转发不实现；`moveTo` / `say` 是纪律入口 |
+| 动作 | `fw.nav` · `fw.store` · `fw.build` | ★ 全库唯一移动入口（意图模型）· 能量流 · 建造/维修/升级 |
+| 基础 | `fw.log` · `fw.room` · `fw.geo` · `fw.body` · `fw.threat` · `fw.slot` · `fw.intel` | 日志与计数 · 房间快照 · 地形可达性 · 身体 · 威胁认知 · 采矿站位 · 房间情报 |
+| 参数 | `config.js` | 全部可调参数：兵种、配额、阈值、战争与导航策略 |
+
+**分层约束**：`main → economy → { mgr.*, quota, construction, war, roles, defense } → utils → { fw.* } → config`，
+单向依赖、无循环引用；参数一律走 `config.js`。
+
+**两条铁律**：
+1. 位移只走 `utils.moveTo` / `utils.moveToRoom`——除 `fw.nav` 外出现 `creep.moveTo` / `creep.move` 即缺陷；
+2. 防抖 / 防卡 / 防越界补丁只允许存在于 `fw.nav` 一处，其它地方加这类补丁一律不允许。
+
+**回归**：harness 10 个场景（rcl1 / rcl1-worker / rcl2 / rcl3 / rcl4 / rcl5 / rcl-up / neighbor / enemy / empty）
++ `boundary.js` 边界横跳与折返断言。改动的自测命令见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ---
 
@@ -127,15 +141,21 @@ pwsh -File tools/deploy.ps1
 
 ## 🧪 测试
 
-三套回归，全部纳入本地校验：**33 项断言，0 失败**。
+五套校验，一条命令跑完（在本地测试台目录下 `node all.js`）：
 
-| 套件 | 数量 | 覆盖 |
-|---|---:|---|
-| **harness** | 7 场景 | RCL1 / RCL1-单工人 / RCL2 / RCL3 / RCL-升级 / RCL5 / 空房间，各跑 700 tick 无异常、无未实现 API |
-| **defense-test** | 19 用例 | 塔优先级与射程、安全模式冷却、撤退触发、工事规划、Memory 卫生 |
+| 套件 | 内容 | 覆盖 |
+|---|---|---|
+| **语法** | 40 个模块 | 全量 `node --check` |
+| **harness** | 10 场景 | RCL1 / RCL1-单工人 / RCL2 / RCL3 / RCL-升级 / RCL4 / RCL5 / **双房间** / 敌袭 / 空世界，各跑 200–800 tick，无异常、无未实现 API |
+| **boundary** | 3 场景 | **边界横跳断言**：房间切换频率、边界格占比、原地抖动折返率 |
+| **defense-test** | 20 用例 | 塔优先级与射程、安全模式冷却、撤退触发、工事规划、Memory 卫生 |
 | **planning-test** | 7 用例 | 连通性洪水填充、封路判定、地形墙豁免、威胁分级、矿源站位 |
 
-> 其中「四邻全被扩展围死 → 判定为封路」这条用例，正是把一次线上事故（单位被建筑围死、路径互相当墙导致永久死锁）固化成回归防线。
+> **`boundary` 这一套是专门为"单位在房间边界来回穿梭"建的。** 这个缺陷前后修过四轮都没根治，
+> 最后发现根因不在某处补丁，而是整层架构缺少"意图"概念：每个 tick 都重新决定去哪，谁都能推翻这个决定。
+> 现在它被量化成三条断言（切换频率 / 边界占比 / 抖动折返率），改任何移动相关代码都必须过这一关。
+
+> 另外「四邻全被扩展围死 → 判定为封路」这条用例，正是把一次线上事故（单位被建筑围死、路径互相当墙导致永久死锁）固化成回归防线。
 
 ---
 

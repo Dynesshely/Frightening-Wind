@@ -34,8 +34,6 @@ module.exports = {
         hauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10 },
         builder: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 6 },
         upgrader: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
-        // 道路通畅维保员：WORK(拆障) + CARRY(收废料) + MOVE
-        roadKeeper: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 4, maxCost: 400 },
         // 远程接驳工：纯搬运（远距离 => 限价 500，走高密度路线）
         remoteHauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10, maxCost: 500 },
         // 护航兵：ATTACK+MOVE，跟着远程采集队走
@@ -60,7 +58,7 @@ module.exports = {
     },
 
     // 生成优先级（同缺口比例时排在前的优先）
-    spawnPriority: ['claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon', 'roadKeeper', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
+    spawnPriority: ['claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
 
     // 侦查：房间情报多少 tick 后视为过期
     intelStaleTicks: 2000,
@@ -69,8 +67,35 @@ module.exports = {
     // 提前替代：creep 剩余 TTL 低于该值就开始补位（避免岗位真空）
     replaceTtl: 120,
 
+    // ---- 战争策略：量敌用兵，经济优先 ----
+    war: {
+        minLevel: 2,            // 低于该 RCL 不主动进攻
+        minPopulation: 8,       // 人口不足不打
+        minStoredEnergy: 300,   // 库存能量不足不打
+        solveTicks: 15,         // 期望多少 tick 解决战斗
+        healFactor: 1.5,        // 敌方每点治疗需要额外多少火力压制
+        safetyFactor: 1.5,      // 安全系数
+        minUnits: 2,            // 最少出兵数
+        maxUnits: 8,            // 单波次上限
+        energyShare: 0.35,      // 用于爆兵的能量占比上限
+
+        // ---- 侵略度自动档位（按经济评分 0~100 切换）----
+        // defensive   防守反击：只打进入我方领地的敌人
+        // opportunist 机会主义：相邻房间有敌人就打（默认）
+        // aggressive  主动清野：搜索范围扩到 2 跳、常备军与巡逻各 +1
+        aggression: {
+            opportunisticAt: 45,   // 评分达到该值进入机会主义
+            aggressiveAt: 75,      // 评分达到该值进入主动清野
+            energyTarget: 1000,    // 存量能量的"满分"基准
+            aggressiveRadius: 2,   // 主动清野时的目标搜索跳数
+        },
+    },
+
     // ---- P2 行为阈值集中管理 ----
     roleHysteresis: 150,        // 同一角色最少在岗 tick
+    // 连续多少 tick 既没移动也没换提示语，就判定"发呆"并强制回老家待命。
+    // 这是所有角色共用的最后一道兜底，防止出现站在房间边界不动几百 tick 的哨兵。
+    idleTicksBeforeHome: 12,
     connectMinExits: 6,         // 建造选址：spawn 至少保留几个可达出口
     patrolLowHits: 0.45,        // 巡逻兵血量低于该比例回塔疗伤
     fleeRange: 4,               // 威胁型敌人进入该范围才撤退
@@ -83,7 +108,7 @@ module.exports = {
 
     // 边防巡逻
     patrolRooms: 4,          // 巡逻路线最多几个房间（相邻房间最多也就 4 个）
-    patrolStayTicks: 40,     // 每个房间驻留多少个 tick 扫荡
+    patrolStayTicks: 180,     // 每个房间驻留多少个 tick 扫荡
     patrolHealRatio: 0.45,   // 血量低于该比例就回老家（塔下面）治疗
 
     // 各等级扩展数量
@@ -99,4 +124,31 @@ module.exports = {
 
     // 单次任务寻路的复用 tick 数（降低 CPU）
     pathReuse: 8,
+
+    // ---- 导航层（fw.nav）----
+    // 这些参数直接决定"会不会在房间边界来回穿梭"，改动前先读 fw.nav.js 顶部注释。
+    nav: {
+        // 意图（一次"要去哪"的承诺）最长存活 tick。超时只上报，不擅自取消。
+        intentTtl: 120,
+        // 连续多少 tick 位置没变判定为停滞（然后换出口格 / 8 方向脱困）
+        stuckTicks: 3,
+        // 连续多少次寻路失败判定目标不可达（拉黑房间，交给角色层换目标）
+        giveUpAfter: 8,
+        // 同一侧出口格按名字散列分流的数量。
+        // 太小会让一堆单位挤在同一个边界格上互相阻挡（move() 返回 OK 但不动），
+        // 线上表现为"一群远程矿工堵在同一条边上"。
+        exitSpread: 8,
+        // 振荡检测窗口 tick
+        oscWindow: 60,
+        // 窗口内跨房间达到该次数即判定振荡
+        oscCount: 5,
+        // 判定振荡后冻结跨房间移动的 tick 数
+        holdTicks: 120,
+        // 冻结期间允许活动范围（离房间中心的切比雪夫距离）
+        holdRadius: 20,
+        // 跨房间到达后必须走进目标房间内部多深（离边界的最小格数）才算"到了"。
+        // 停在入口格上会被下一 tick 的角色逻辑当成"还在边缘"，稍一犹豫就跨回去 ——
+        // 线上实测过：侦察兵在 W7N2(0,37) 与 W8N2(49,37) 之间每 2 tick 往返一次，持续几百 tick。
+        roomEntryDepth: 8,
+    },
 };
