@@ -16,6 +16,7 @@
  *
  * 依赖：fw.log（计数 + 说话）、fw.nav（唯一移动入口）。不依赖 utils（避免循环 require）。
  */
+const config = require('config');
 const log = require('fw.log');
 const nav = require('fw.nav');
 
@@ -52,6 +53,12 @@ function freeEnergyCap(target) {
     return target.store.getFreeCapacity(RESOURCE_ENERGY) || 0;
 }
 
+/** 任意结构/creep 身上的能量存量 */
+function usedEnergyOf(target) {
+    if (!target || !target.store) return 0;
+    return target.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+}
+
 /**
  * 工作状态机：空手 → 先去装满；干活干到空手 → 再回去装。
  * 没有这个状态机，creep 会在"刚交掉一点货有空格"时立刻掉头回矿源，
@@ -83,7 +90,12 @@ function pickSource(creep, data) {
     for (const c of data.creeplist) {
         if (c.name === creep.name) continue;
         const sid = c.memory && c.memory.sourceId;
-        if (sid !== undefined && load[sid] !== undefined) load[sid]++;
+        if (sid === undefined || load[sid] === undefined) continue;
+        // 静态矿工占的是"独占站位"，一个人就把那格的通行算满了；
+        // 自由采集者挤过去只会互相顶位（线上实测：源 A 只有 1 个可站格，
+        // 却被 1 个矿工 + 1 个采集者同时占，结果两边都采不到）。
+        const w = (c.memory && c.memory.role === 'miner') ? 3 : 1;
+        load[sid] += w;
     }
 
     let best = data.sources[0];
@@ -123,11 +135,15 @@ function hasEnergyIn(store) {
 
 function nearestLooseEnergy(creep, data) {
     let best = null;
-    let bestDist = 999;
+    let bestScore = 0;
+    // 评分 = 量 / (距离 + 2)：近处的小堆也比远处的大堆值得弯腰。
+    // 旧实现是"距离优先 + 量必须 >= 20"，结果墓碑/掉落物经常被当成不存在。
     const consider = (obj, amount) => {
-        if (amount < 20) return;
+        if (amount < 10) return;
         const d = creep.pos.getRangeTo(obj);
-        if (d < bestDist) { bestDist = d; best = obj; }
+        if (d > 12) return;
+        const score = amount / (d + 2);
+        if (score > bestScore) { bestScore = score; best = obj; }
     };
     for (const d of data.dropped) {
         if (d.resourceType === RESOURCE_ENERGY) consider(d, d.amount);
@@ -205,23 +221,63 @@ function transferFrom(creep, target) {
  * 返回 true 表示已经处理
  */
 function deliverEnergy(creep, data) {
-    const targets = [];
+    // spawn/扩展的存量应该"够孵下一个兵就停"，多出来的要流向升级端。
+    // 旧实现只要有空格就往 spawn/扩展送，而它们容量 1300、实测常年只存 100 上下，
+    // 于是永远"有空格"，把升级者彻底饿死（docs/OPTIMIZATION.md F4）。
+    // 囤货款：孵化器正在为某个大身体攒钱时，spawn/扩展要有足够的余量；
+    // 否则多余的立刻流走，大兵永远攒不够（实测 spawn+扩展常年停在 250）。
+    // 没有在攒的时候用较低基线，让能量尽快流向控制器容器（升级端）。
+    let reserve = (config.spawn && config.spawn.reserve) || 350;
+    const pending = Memory.fw && Memory.fw.spawnReserve && Memory.fw.spawnReserve[data.room.name];
+    if (pending && pending.need > reserve) reserve = pending.need;
+    let stored = 0;
+    for (const s of data.spawns) stored += usedEnergyOf(s);
+    for (const e of data.extensions) stored += usedEnergyOf(e);
 
+    if (stored < reserve) {
+        const targets = [];
+        for (const s of data.spawns) {
+            if (freeEnergyCap(s) > 0) targets.push(s);
+        }
+        for (const e of data.extensions) {
+            if (freeEnergyCap(e) > 0) targets.push(e);
+        }
+        if (targets.length) {
+            targets.sort((a, b) => creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b));
+            return transferTo(creep, targets[0]);
+        }
+    }
+
+    // 攒够了：优先喂"控制器旁容器"（升级者的口粮），这是把能量变成 RCL 的唯一通路。
+    // 顺序必须在塔之前 —— 实测塔有 340 能量（够打 34 次）却仍被优先补满，
+    // 导致控制器容器长期 0 库存、升级者无货可取。
+    const controller = data.room.controller;
+    if (controller) {
+        for (const c of data.containers) {
+            if (c.pos.getRangeTo(controller) > 3) continue;
+            if (usedEnergyOf(c) >= 1000) continue;
+            if (freeEnergyCap(c) <= 0) continue;
+            return transferTo(creep, c);
+        }
+    }
+
+    // 塔：只在存量不足一半时补给（满容量 1000，500 足够应付日常）
+    for (const t of data.towers) {
+        if (usedEnergyOf(t) >= 500) continue;
+        if (freeEnergyCap(t) > 0) return transferTo(creep, t);
+    }
+
+    // 其次沉淀到 storage
+    if (data.storage && freeEnergyCap(data.storage) > 0) {
+        return transferTo(creep, data.storage);
+    }
+
+    // 兜底：spawn/扩展还有空格就送（说明上面都被占满了）
     for (const s of data.spawns) {
-        if (freeEnergyCap(s) > 0) targets.push(s);
+        if (freeEnergyCap(s) > 0) return transferTo(creep, s);
     }
     for (const e of data.extensions) {
-        if (freeEnergyCap(e) > 0) targets.push(e);
-    }
-
-    if (targets.length) {
-        targets.sort((a, b) => creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b));
-        return transferTo(creep, targets[0]);
-    }
-
-    // 塔
-    for (const t of data.towers) {
-        if (freeEnergyCap(t) > 0) return transferTo(creep, t);
+        if (freeEnergyCap(e) > 0) return transferTo(creep, e);
     }
 
     return false;
@@ -237,6 +293,88 @@ function transferTo(creep, target) {
     if (r === OK) bump('transfer');
     else bump('transferErr_' + r);
     return r === OK;
+}
+
+/* ------------------------------ 生命周期 ------------------------------ */
+
+/** creep 走一格要几个 tick（疲劳模型：ceil(非MOVE / (2·MOVE))） */
+function tileTime(creep) {
+    let moves = 0;
+    let others = 0;
+    const loaded = usedEnergy(creep) > 0;
+    for (const p of (creep.body || [])) {
+        if (p.type === MOVE) moves++;
+        else if (p.type === CARRY && !loaded) continue;   // 空 CARRY 不产生疲劳
+        else others++;
+    }
+    if (moves <= 0) return 99;
+    return Math.max(1, Math.ceil(others / (2 * moves)));
+}
+
+/** 最近的可交付点（容器 / 仓储 / spawn） */
+function retireSpot(creep, data) {
+    let best = null;
+    let bestD = 999;
+    const take = obj => {
+        if (!obj) return;
+        const d = creep.pos.getRangeTo(obj);
+        if (d < bestD) { bestD = d; best = obj; }
+    };
+    for (const c of data.containers) take(c);
+    take(data.storage);
+    for (const s of data.spawns) take(s);
+    return best;
+}
+
+/**
+ * 临终交付：TTL 不足以走完回程时，先把身上的能量处理掉。
+ *
+ * 为什么必须做：creep 死亡时只有 `CREEP_CORPSE_RATE = 0.2` 的资源变成墓碑，
+ * 也就是带着 50 能量死掉会白白蒸发 40。主动倾倒能保住 100%。
+ *
+ * 返回 true 表示"本 tick 已经在处理后事"，调用方应跳过正常角色逻辑。
+ */
+function retire(creep, data) {
+    const ttl = creep.ticksToLive;
+    // ★ 必须先判断"是不是真的快死了"，再谈交付。
+    // 之前的版本把 deliverEnergy 放在 TTL 检查之前，结果每个揣着 2 点能量的采集者
+    // 每 tick 都被这里接管去"交付"，采集链当场停摆（线上事故：progress 卡死 1200 tick）。
+    if (ttl === undefined || ttl > 300) return false;
+    const carried = usedEnergy(creep);
+    if (carried <= 0) return false;
+
+    // 已经在交付点上：直接交掉
+    if (deliverEnergy(creep, data)) return true;
+
+    // 身边 1 格内有容器就倒进去（矿工站在矿源容器旁，这样最省事）
+    for (const c of data.containers) {
+        if (creep.pos.getRangeTo(c) > 1) continue;
+        if (freeEnergyCap(c) <= 0) continue;
+        return transferTo(creep, c);
+    }
+
+    const spot = retireSpot(creep, data);
+    const dist = spot ? creep.pos.getRangeTo(spot) : 99;
+    const perTile = tileTime(creep);
+    const need = dist * perTile + 3;
+
+    // 时间还充裕：交给正常角色逻辑（它自己会把货送到）
+    if (ttl > need + 8) return false;
+
+    if (spot && ttl >= need) {
+        say(creep, '🏁');
+        moveTo(creep, spot);
+        return true;
+    }
+
+    // 来不及了：就地倒掉，形成掉落物让路过的单位捡（好过蒸发 80%）
+    const r = creep.drop(RESOURCE_ENERGY);
+    if (r === OK) {
+        bump('retireDrop');
+        say(creep, '💀');
+        return true;
+    }
+    return false;
 }
 
 /**
@@ -297,6 +435,8 @@ function spawnSurplus(creep, data) {
 module.exports = {
     storeOf,
     usedCap,
+    retire,
+    tileTime,
     usedEnergy,
     freeCap,
     freeEnergyCap,

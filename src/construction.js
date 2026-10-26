@@ -211,62 +211,55 @@ function planBorderRamparts(room, data, occ, createdBudget) {
     const spawn = data.spawns[0];
     if (!spawn) return;
 
+    // 咽喉点一次算好就永久缓存（只跟地形和 spawn 位置有关，二者都不变）
+    if (!Memory.fw) Memory.fw = {};
+    if (!Memory.fw.choke) Memory.fw.choke = {};
+    const ckey = room.name + ':' + spawn.id;
+    let pts = Memory.fw.choke[ckey];
+    if (!pts) {
+        pts = utils.chokePoints(room, spawn);
+        Memory.fw.choke[ckey] = pts;
+        if (pts.length) {
+            console.log('[FW] ' + room.name + ' 咽喉 ' + pts.length + ' 格: ' + pts.slice(0, 6).join(' '));
+        }
+    }
+    // 找不到明显的咽喉（开阔房间）就先不建 —— 沿边界随便撒 rampart 是纯浪费
+    if (!pts.length) return;
+
+    const near = (x, y) => {
+        for (const p of pts) {
+            if (Math.abs(p[0] - x) <= 1 && Math.abs(p[1] - y) <= 1) return true;
+        }
+        return false;
+    };
+
+    // 撤销建错位置的 rampart 工地（只删工地；已建成的保留，避免拆了又建）
+    const stale = [];
+    for (const s of data.sites) {
+        if (s.structureType !== STRUCTURE_RAMPART) continue;
+        if (!near(s.pos.x, s.pos.y)) stale.push(s);
+    }
+    for (const s of stale) {
+        console.log('[FW] ' + room.name + ' 撤销错位 rampart 工地 @' + s.pos.x + ',' + s.pos.y);
+        s.remove();
+    }
+
     let existing = 0;
     for (const w of (data.walls || [])) if (w.structureType === STRUCTURE_RAMPART) existing++;
     for (const s of data.sites) if (s.structureType === STRUCTURE_RAMPART) existing++;
-    if (existing >= 10) return;
 
-    // 与塔一致的威胁方向
-    const dirs = [
-        { d: 1, dx: 0, dy: -1 },
-        { d: 3, dx: 1, dy: 0 },
-        { d: 5, dx: 0, dy: 1 },
-        { d: 7, dx: -1, dy: 0 },
-    ];
-    const last = Memory.fw && Memory.fw.lastHostile;
-    const sx = spawn.pos.x;
-    const sy = spawn.pos.y;
-    let best = dirs[0];
-    let bestScore = -1;
-    for (const dir of dirs) {
-        let score = 0;
-        if (last && (Game.time - last.t) < 3000) {
-            const vx = last.x - sx;
-            const vy = last.y - sy;
-            if (dir.dx !== 0 && Math.sign(vx) === dir.dx && Math.abs(vx) > Math.abs(vy)) score += 6;
-            if (dir.dy !== 0 && Math.sign(vy) === dir.dy && Math.abs(vy) > Math.abs(vx)) score += 6;
-        }
-        if (room.controller) {
-            const cx = room.controller.pos.x - sx;
-            const cy = room.controller.pos.y - sy;
-            if (dir.dx !== 0 && Math.sign(cx) === dir.dx) score += 1;
-            if (dir.dy !== 0 && Math.sign(cy) === dir.dy) score += 1;
-        }
-        if (score > bestScore) { bestScore = score; best = dir; }
-    }
-    if (bestScore <= 0) return;   // 没有明确威胁方向就先不铺
-
-    const terrain = room.getTerrain();
-    // 该方向的出口格（房间边缘），取离 spawn 最近的几格
-    const candidates = [];
-    for (let i = 3; i < 47; i++) {
-        let x = sx;
-        let y = sy;
-        if (best.dx !== 0) { x = best.dx > 0 ? 48 : 1; y = i; }
-        else { y = best.dy > 0 ? 48 : 1; x = i; }
-        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+    const limit = config.maxBorderRamparts || 12;
+    for (const p of pts) {
+        if (existing >= limit) break;
+        if (createdBudget >= config.maxNewSitesPerTick) break;
+        const x = p[0];
+        const y = p[1];
         if (occ[x + ',' + y]) continue;
-        candidates.push({ x: x, y: y, d: Math.abs(x - sx) + Math.abs(y - sy) });
-    }
-    candidates.sort((a, b) => a.d - b.d);
-    for (const c of candidates) {
-        if (createdBudget >= config.maxNewSitesPerTick) return;
-        if (existing >= 10) return;
-        if (room.createConstructionSite(c.x, c.y, STRUCTURE_RAMPART) === OK) {
-            occ[c.x + ',' + c.y] = true;
+        if (room.createConstructionSite(x, y, STRUCTURE_RAMPART) === OK) {
+            occ[x + ',' + y] = true;
             createdBudget++;
             existing++;
-            console.log('[FW] ' + room.name + ' 边境 rampart @' + c.x + ',' + c.y);
+            console.log('[FW] ' + room.name + ' 咽喉 rampart @' + x + ',' + y);
         }
     }
 }

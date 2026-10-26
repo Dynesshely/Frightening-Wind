@@ -26,14 +26,54 @@ module.exports = {
 
     // 角色身体单元：unit 会按能量预算尽量重复，剩余能量用于平衡负载/移速
     bodies: {
-        // 自采自送的通用工人
-        harvester: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 6 },
-        // 静态矿工：站在矿源/容器上一直挖，WORK 越多越好（unit 保持 200 能量，保证 RCL1/2 也造得出来）
-        miner: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
-        // 搬运工：只堆 CARRY + MOVE
-        hauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10 },
-        builder: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 6 },
-        upgrader: { unit: ['work', 'carry', 'move'], filler: ['work', 'carry', 'move'], maxUnits: 8 },
+        // 经济角色用 tiers：给定能量预算，直接取"造得起且最大"的那一档。
+        // 用固定档位而不是 unit 循环 + filler 平衡，是因为后者在 600 能量下会拼出
+        // 3W3C3M（3 个 WORK），而矿工要的是 5W1C1M。档位让身体比例可控、可预测。
+        //
+        // 自采自送的通用工人：200 / 350 / 450
+        harvester: {
+            tiers: [
+                ['work', 'carry', 'move'],
+                ['work', 'work', 'carry', 'move', 'move'],
+                ['work', 'work', 'work', 'carry', 'move', 'move'],
+            ],
+            maxUnits: 6,
+        },
+        // 静态矿工：站桩采集，WORK 越多越好；600 档是 5W1C1M（模型算的最优形态）
+        miner: {
+            tiers: [
+                ['work', 'carry', 'move'],
+                ['work', 'work', 'carry', 'move', 'move'],
+                ['work', 'work', 'work', 'carry', 'move', 'move'],
+                ['work', 'work', 'work', 'work', 'work', 'carry', 'move'],
+            ],
+            maxUnits: 8,
+        },
+        // 搬运工：只堆 CARRY + MOVE，150 / 300 / 450（载 100 / 200 / 300）
+        hauler: {
+            tiers: [
+                ['carry', 'carry', 'move'],
+                ['carry', 'carry', 'carry', 'carry', 'move', 'move'],
+                ['carry', 'carry', 'carry', 'carry', 'carry', 'carry', 'move', 'move', 'move'],
+            ],
+            maxUnits: 10,
+        },
+        builder: {
+            tiers: [
+                ['work', 'carry', 'move'],
+                ['work', 'work', 'carry', 'move', 'move'],
+                ['work', 'work', 'work', 'carry', 'move', 'move'],
+            ],
+            maxUnits: 6,
+        },
+        upgrader: {
+            tiers: [
+                ['work', 'carry', 'move'],
+                ['work', 'work', 'carry', 'move', 'move'],
+                ['work', 'work', 'work', 'carry', 'move', 'move'],
+            ],
+            maxUnits: 8,
+        },
         // 远程接驳工：纯搬运（远距离 => 限价 500，走高密度路线）
         remoteHauler: { unit: ['carry', 'carry', 'move'], filler: ['carry', 'move'], maxUnits: 10, maxCost: 500 },
         // 护航兵：ATTACK+MOVE，跟着远程采集队走
@@ -58,7 +98,35 @@ module.exports = {
     },
 
     // 生成优先级（同缺口比例时排在前的优先）
-    spawnPriority: ['claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon', 'reserver', 'miner', 'hauler', 'harvester', 'upgrader', 'builder', 'remoteHarvester'],
+    // 经济角色必须排在扩张/军事之前：实测 reserver（650 能量）排在第一位时，
+    // 它会一直霸占"下一个孵化目标"，而房间根本攒不到 650，spawn 长期空转。
+    spawnPriority: ['miner', 'harvester', 'hauler', 'upgrader', 'builder', 'remoteHarvester', 'reserver', 'claimer', 'pioneer', 'soldier', 'patroller', 'scout', 'recon'],
+
+    // ---- 孵化预算（docs/OPTIMIZATION.md F1）----
+    // 旧实现用 room.energyAvailable 当预算，实测均值 120 → 永远只造得出 1W1C1M（200），
+    // 5W1C1M（600）在结构上造不出来。这里给每个角色一个"值得攒到"的目标成本：
+    // 能量不够就不孵（合法的投资等待），再用 starveTicks 兜底防止人口断档。
+    spawn: {
+        budget: {
+            miner: 450,             // 3W1C2M（5W 要 600，实测攒不到；450 是能稳定达成的档）
+            hauler: 450,            // 6C3M，载 300
+            harvester: 450,
+            upgrader: 450,
+            builder: 450,
+            remoteHarvester: 450,
+            remoteHauler: 500,
+        },
+        // 攒钱最多等多少 tick，超时就用当前能量造小一号（防止老人死光没人接班）
+        starveTicks: 90,
+        // 人口低于该值时进入"保命模式"：不攒钱，用当前能量能造多大造多大。
+        // 实测教训：只攒钱不管人口，850 tick 内人口从 17 掉到 6，采集链直接崩掉。
+        minPopulation: 12,
+        // 连最小身体（200）都造不起时不孵
+        minEnergy: 200,
+        // spawn/扩展里攒到这个量就"够了"，多出来的能量改投控制器旁容器（升级端）。
+        // 否则容量 1300 的扩展永远有空位，会把所有能量吸干、让升级者长期饿着。
+        reserve: 350,
+    },
 
     // 侦查：房间情报多少 tick 后视为过期
     intelStaleTicks: 2000,
@@ -117,8 +185,11 @@ module.exports = {
     towerLimit: { 0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 3, 8: 6 },
     // 各等级容器是否可建
     canBuildContainers: 2,
-    // 各等级 storage
-    canBuildStorage: 4,
+    // 各等级 storage（RCL4 先不新建：30000 hit 会把当期产能全部吃掉，
+    // 已有工地由 fw.build.sitePriority 动态降级）
+    canBuildStorage: 5,
+    // 边境 rampart 上限（咽喉点通常 3~8 格；给一点余量，但绝不再沿边界铺）
+    maxBorderRamparts: 12,
     // 各等级 link 数量
     linkLimit: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 2, 6: 3, 7: 4, 8: 6 },
 

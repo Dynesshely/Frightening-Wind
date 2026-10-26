@@ -17,15 +17,65 @@ const utils = require('utils');
 // pickupLoose 是"顺手捡漏"的公共小工具，放在 role.harvester 里统一维护。
 const harvesterMod = require('role.harvester');
 
+/**
+ * 升级者的合法货源：只认 storage 与"控制器 3 格内的容器"。
+ *
+ * 为什么不能就近取任意容器：矿源旁的容器是搬运工的转运站。
+ * 旧实现用阈值 50 就近取，而搬运工要攒到 100 才动 —— 升级者总先一步把货抽干，
+ * 运输队永远等不到整车（优先级倒挂，见 docs/OPTIMIZATION.md F3）。
+ */
+function pickUpgradeSupply(creep, data) {
+    // 1) storage：量大、本来就是为了沉淀能量而建
+    if (data.storage && utils.usedEnergy(data.storage) > 300) {
+        utils.transferFrom(creep, data.storage);
+        return true;
+    }
+
+    // 2) 控制器 3 格内的容器：专门喂升级者的"就近续杯点"
+    const controller = data.room.controller;
+    let best = null;
+    let bestDist = 999;
+    if (controller) {
+        for (const c of data.containers) {
+            if (c.pos.getRangeTo(controller) > 3) continue;
+            if (utils.usedEnergy(c) < 50) continue;
+            const d = creep.pos.getRangeTo(c);
+            if (d < bestDist) { bestDist = d; best = c; }
+        }
+        if (best) { utils.transferFrom(creep, best); return true; }
+    }
+
+    // 3) 兜底：控制器容器还没建成时，可以从任意容器取，但留一点给搬运工。
+    //    阈值必须贴近实际情况：容器长期只有 40~80，设 150 等于永远取不到货，
+    //    升级直接停摆（线上实测 progress 卡死 1200+ tick）。
+    for (const c of data.containers) {
+        if (utils.usedEnergy(c) < 30) continue;
+        const d = creep.pos.getRangeTo(c);
+        if (d < bestDist) { bestDist = d; best = c; }
+    }
+    if (best) { utils.transferFrom(creep, best); return true; }
+
+    // 4) 最后兜底：spawn/扩展里囤了很多（说明孵化和升级抢同一笔钱），
+    //    取一点出来升级，避免"spawn 满着、控制器却在掉级"。
+    let spawnStored = 0;
+    for (const s of data.spawns) spawnStored += utils.usedEnergy(s);
+    if (spawnStored >= 300 && data.spawns.length) {
+        utils.transferFrom(creep, data.spawns[0]);
+        return true;
+    }
+    return false;
+}
+
 function upgrader(creep, data) {
     if (!utils.isWorking(creep)) {
-        // 1) 就近有存量的容器/仓储 -> 取
-        const near = utils.nearestEnergyStore(creep, data, 50, false);
-        if (near && creep.pos.getRangeTo(near) <= 8) {
-            utils.transferFrom(creep, near);
-            return;
+        // 1) 只从"合法货源"取（storage / 控制器旁容器），不碰矿源旁的转运容器
+        if (pickUpgradeSupply(creep, data)) return;
+        // 注意：这里不能用 pickupLoose —— 它内部是 withdrawEnergy，会在"容器比矿源远"时
+        // 直接转去 harvestSource，把升级者变成矿工（线上实测两个升级者跑去抢矿位）。
+        const loose = utils.nearestLooseEnergy(creep, data);
+        if (loose && creep.pos.getRangeTo(loose) <= 6) {
+            if (utils.transferFrom(creep, loose)) return;
         }
-        if (harvesterMod.pickupLoose(creep, data)) return;
         // 2) spawn 满仓时搬它的闲置能量
         const spare = utils.spawnSurplus(creep, data);
         if (spare) return;
@@ -45,7 +95,14 @@ function upgrader(creep, data) {
             }
         }
 
-        // 4) 实在没有补给点才自己去采
+        // 4) 完全没有补给点：在控制器旁待命。
+        //    坚决不去采矿源 —— 实测两个升级者跑到 (43,28)/(43,29) 和矿工抢同一条矿脉，
+        //    升级者只有 1 个 WORK（采 2 e/tick），抢走的是矿工的站位，净损失。
+        if (controller) {
+            utils.say(creep, '💤');
+            if (creep.pos.getRangeTo(controller) > 3) utils.moveTo(creep, controller, { range: 3 });
+            return;
+        }
         utils.harvestSource(creep, data);
         return;
     }
@@ -58,4 +115,5 @@ function upgrader(creep, data) {
 
 module.exports = {
     upgrader,
+    pickUpgradeSupply,
 };

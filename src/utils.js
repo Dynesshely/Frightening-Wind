@@ -74,6 +74,8 @@ module.exports = Object.assign({
     transferTo: storeMod.transferTo,
     transferFrom: storeMod.transferFrom,
     dumpSurplus: storeMod.dumpSurplus,
+    retire: storeMod.retire,
+    tileTime: storeMod.tileTime,
     spawnSurplus: storeMod.spawnSurplus,
     nearestLooseEnergy: storeMod.nearestLooseEnergy,
     nearestEnergyStore: storeMod.nearestEnergyStore,
@@ -92,6 +94,7 @@ module.exports = Object.assign({
     classifyHostiles: roomMod.classifyHostiles,
     accessCount: geoMod.accessCount,
     wouldBlockAccess: geoMod.wouldBlockAccess,
+    chokePoints: geoMod.chokePoints,
     inferRole: bodyMod.inferRole,
     countRole: bodyMod.countRole,
 }, slotMod, intelMod);

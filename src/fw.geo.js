@@ -62,4 +62,74 @@ function wouldBlockAccess(room, occ, spot, center) {
     return accessCount(room, occ, spot, center) < 6;
 }
 
-module.exports = { accessCount, wouldBlockAccess };
+/**
+ * 咽喉点：把房间按"离 spawn 的步数"分层，**层宽就是通道容量**。
+ *
+ * 从 spawn 做 BFS，第 d 层的格子数 = 走到那个距离必须同时容纳的单位数。
+ * 层宽突然变窄的地方，就是敌人必经的咽喉 —— rampart 应该建在那里，
+ * 而不是沿着房间边缘按距离撒点（那样封 10 格等于没封，一条边有 44 个可走格）。
+ *
+ * 返回 [[x,y], ...]，按"贴墙程度"降序（三面是墙的格子最值得封）。
+ * 找不到明显咽喉（层宽 > 12）时返回空数组 —— 宁可先不建，也不要浪费建造能量。
+ */
+function chokePoints(room, spawn) {
+    const W = 50;
+    const terrain = room.getTerrain();
+    const dist = new Int16Array(W * W);
+    dist.fill(-1);
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const sx = spawn.pos.x;
+    const sy = spawn.pos.y;
+    const start = sy * W + sx;
+    dist[start] = 0;
+    const queue = [start];
+    let head = 0;
+    const layers = [];
+    while (head < queue.length) {
+        const idx = queue[head++];
+        const d = dist[idx];
+        const x = idx % W;
+        const y = (idx - x) / W;
+        layers[d] = (layers[d] || 0) + 1;
+        for (let i = 0; i < 4; i++) {
+            const nx = x + dirs[i][0];
+            const ny = y + dirs[i][1];
+            if (nx < 1 || nx > 48 || ny < 1 || ny > 48) continue;
+            const ni = ny * W + nx;
+            if (dist[ni] !== -1) continue;
+            if (terrain.get(nx, ny) === TERRAIN_MASK_WALL) continue;
+            dist[ni] = d + 1;
+            queue.push(ni);
+        }
+    }
+
+    // 只在离 spawn 8~30 步的区间里找：太近会把自己的活动空间封死，太远就是边界了
+    let bestD = -1;
+    let bestW = 1e9;
+    for (let d = 8; d <= 30 && d < layers.length; d++) {
+        const w = layers[d];
+        if (!w) continue;
+        if (w < bestW) { bestW = w; bestD = d; }
+    }
+    if (bestD < 0 || bestW > 12) return [];
+
+    const pts = [];
+    for (let i = 0; i < W * W; i++) {
+        if (dist[i] !== bestD) continue;
+        const x = i % W;
+        const y = (i - x) / W;
+        let walls = 0;
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx < 0 || nx > 49 || ny < 0 || ny > 49 || terrain.get(nx, ny) === TERRAIN_MASK_WALL) walls++;
+            }
+        }
+        pts.push([x, y, walls]);
+    }
+    pts.sort((a, b) => b[2] - a[2]);
+    return pts.map(p => [p[0], p[1]]);
+}
+
+module.exports = { accessCount, wouldBlockAccess, chokePoints };

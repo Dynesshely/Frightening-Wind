@@ -33,8 +33,13 @@ function miner(creep, data) {
         // 站到自己的专属站位格上，再采集（同一矿源的矿工各站一格，不排队）
         const slot = utils.ensureSlot(creep, source);
         if (!slot) {
-            // 该矿源没有可用站位（地形挤死/被占满）：回退通用采集去找别的源
-            utils.harvestSource(creep, data);
+            // 该矿源的站位已经满了：**绝不能回退成自由采集**。
+            // 线上事故：抢不到槽位的矿工挤到矿源旁边，把占位矿工挤走，双方来回抖动，
+            // 整条采集链直接崩掉（容器长期 0，搬运工全部待命）。
+            // 正确做法是让它去干搬运/交付，等多余的人口自然淘汰。
+            if (utils.deliverEnergy(creep, data)) return;
+            if (utils.dumpSurplus(creep, data)) return;
+            utils.upgradeController(creep, data.room);
             return;
         }
         if (slot) {

@@ -31,14 +31,26 @@ const moveTo = nav.moveTo;
  */
 function sitePriority(site, data) {
     switch (site.structureType) {
-        case STRUCTURE_CONTAINER:
+        case STRUCTURE_CONTAINER: {
             for (const s of (data.sources || [])) {
                 if (site.pos.getRangeTo(s.pos) <= 2) return 1;
             }
+            // 控制器旁容器 = 升级者的唯一供能点，没它升级直接停摆，所以排最前
+            const ctrl = data.room && data.room.controller;
+            if (ctrl && site.pos.getRangeTo(ctrl.pos) <= 3) return 1;
             return 5;
+        }
         case STRUCTURE_TOWER: return 2;
         case STRUCTURE_EXTENSION: return 3;
-        case STRUCTURE_STORAGE: return 5;
+        case STRUCTURE_STORAGE: {
+            // storage 是 30000 hit 的大工程，相当于 30000 能量。
+            // 实测：房间产出 4~5 e/tick，3 个建造者灌进去之后升级直接停摆。
+            // 能量不到容量的 60% 就先放着，等 RCL5 产能上来再建。
+            const room = data.room;
+            const avail = room ? (room.energyAvailable || 0) : 0;
+            const cap = room ? (room.energyCapacityAvailable || 300) : 300;
+            return avail < cap * 0.6 ? 99 : 6;
+        }
         case STRUCTURE_LINK: return 5;
         case STRUCTURE_ROAD: return 7;
         default: return 6;

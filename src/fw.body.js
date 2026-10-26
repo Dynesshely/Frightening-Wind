@@ -43,9 +43,35 @@ function bodyCost(body) {
 /**
  * 在给定能量预算内，尽可能造出最大的身体
  */
+/**
+ * 固定档位版本：从 tiers 里挑"造价不超过预算且最大"的那一档。
+ * 档位顺序不必严格递增，但要把贵的写在后面。
+ */
+function planTieredBody(tiers, energy) {
+    let best = null;
+    let bestCost = -1;
+    for (const tier of tiers) {
+        if (!tier || !tier.length) continue;
+        const body = [];
+        let ok = true;
+        for (const token of tier) {
+            const part = PART[token.toUpperCase()];
+            if (part === undefined) { ok = false; break; }
+            body.push(part);
+        }
+        if (!ok || body.length > 50) continue;
+        const cost = bodyCost(body);
+        if (cost <= energy && cost > bestCost) { best = body; bestCost = cost; }
+    }
+    return best;
+}
+
 function planBody(role, energy) {
     const def = config.bodies[role];
     if (!def) return null;
+
+    // 经济角色走固定档位：身体比例可控，不会出现"预算 600 却拼出 3W3C3M"。
+    if (def.tiers) return planTieredBody(def.tiers, energy);
 
     const body = [];
     let cost = 0;
@@ -122,4 +148,4 @@ function countRole(data, role) {
     return data.creepsByRole[role] || 0;
 }
 
-module.exports = { bodyCost, planBody, inferRole, countRole };
+module.exports = { bodyCost, planBody, planTieredBody, inferRole, countRole };

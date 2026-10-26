@@ -24,20 +24,40 @@ function computeQuota(room, data) {
     }
     const bare = data.sources.length - containerized;
 
-    // 静态矿工：按地形站位定编，最多 2 人/源（再多就是排队）
-    quota.miner = 0;
+    // ---- 矿工编制按 WORK 数反推（docs/OPTIMIZATION.md F5）----
+    // source 稳态产出  Y(n) = 10n/(5+n)  →  n = 5Y/(10−Y)
+    // 旧实现按"地形站位"定编、每源最多 2 人，并假设"2 个 3WORK 吃满 10 e/tick"，
+    // 但模型算出来 2 个 3WORK 只有 5.45 e/tick —— 这个假设把产能天花板压掉了一半。
+    const targetPerSource = level >= 6 ? 8.0
+        : (level >= 5 ? 7.5 : (level >= 4 ? 6.67 : 5.0));
+    const needWork = Math.ceil((5 * targetPerSource) / (10 - targetPerSource));
+    const WORK_PER_MINER = 5;                                   // 5W1C1M
+    const minersPerSource = Math.max(1, Math.ceil(needWork / WORK_PER_MINER));
+
+    // 按"WORK 缺口"而不是"人头"定编：线上还有一批 1W1C1M 的老矿工，
+    // 如果只数人头（4 个 > 配额 2）就永远轮不到造 5W 矿工，产能被老身体锁死。
+    let existingMinerWork = 0;
+    for (const c of data.creeplist) {
+        if (!c.memory || c.memory.role !== 'miner') continue;
+        for (const p of (c.body || [])) if (p.type === WORK) existingMinerWork++;
+    }
+    // 每源分别按"自己的站位格数"封顶，不能把所有源的槽位加在一起算。
+    // 线上事故：source A 只有 1 个可站格，却被算出 4 个矿工编制，
+    // 抢不到槽位的矿工回退成自由采集，把占位矿工挤来挤去，整条采集链崩掉。
+    let wantedMiners = 0;
     for (const s of data.sources) {
         if (!construction.sourceHasContainer(data, s)) continue;
-        quota.miner += Math.max(1, Math.min(2, utils.harvestSlots(s)));
+        wantedMiners += Math.min(minersPerSource, Math.max(1, utils.harvestSlots(s)));
     }
+    const missingWork = Math.max(0, needWork * Math.max(1, containerized) - existingMinerWork);
+    quota.miner = Math.max(0, Math.min(wantedMiners, Math.ceil(missingWork / WORK_PER_MINER)));
 
-    // 自采工人：没有容器的矿源，每个矿源 2 个；能量上限高时 3 个
-    // 自采工人同样按地形站位定编（没有容器的矿源）
+    // 自采工人：没有容器的矿源用自采自送（效率只有 60%），编制跟着 RCL 走
     quota.harvester = 0;
     for (const s of data.sources) {
         if (construction.sourceHasContainer(data, s)) continue;
-        // 自采工减编：矿源长期接近满仓 = 再生速度本就吃不满，人多只会互相抢位抖动
-        quota.harvester += Math.max(1, Math.min(capacity >= 800 ? 2 : 1, utils.harvestSlots(s)));
+        const selfHaul = level >= 4 ? 3 : (capacity >= 800 ? 2 : 1);
+        quota.harvester += Math.max(1, Math.min(selfHaul, utils.harvestSlots(s)));
     }
 
     // 搬运工：有容器才需要；能量上限低时先给 1 个（货源不足，多了只会闲置）
@@ -53,7 +73,11 @@ function computeQuota(room, data) {
     // 军事/侦查类兵种：只有经济已经转起来（至少 2 个经济单位、其中有采集者/矿工）才允许造，
     // 否则 130 能量的士兵会把这个房间的启动资金吃掉，直接锁死经济
     const econCount = utils.countRole(data, 'harvester') + utils.countRole(data, 'miner') + utils.countRole(data, 'hauler');
-    const econHealthy = econCount >= 2 && (utils.countRole(data, 'harvester') + utils.countRole(data, 'miner')) >= 1;
+    // "经济健康"不能只看人头：线上出现过 7 个经济单位 + 2 个巡逻兵，而 spawn 存量长期
+    // 只有 14 能量、容器全空的情况 —— 人头够了但根本没钱。加一道能量门槛。
+    const econHealthy = econCount >= 2
+        && (utils.countRole(data, 'harvester') + utils.countRole(data, 'miner')) >= 1
+        && (room.energyAvailable || 0) >= 200;
 
     // 战争计划：每 tick 更新（模块内部自带经济门槛，不满足时返回 idle）
     const warPlan = war.update(room, data);
@@ -80,8 +104,11 @@ function computeQuota(room, data) {
     // 升级者：容器体系搭起来后它就是"消耗端"，全链吞吐都被它卡着，所以要多配。
     // RCL2~4: 4 个；RCL5+: 5 个（再高由下面的"库存自适应"继续加）
     // 没有容器时也必须有人升级，否则控制器会降级（线上真踩过）
+    // 消耗端不能多于供给端：旧值 RCL4 配 4 个，而实测供给只有 0.70 e/tick，
+    // 每个升级者 83% 时间待命，摊销 0.53 e/tick 却吃掉了升级量的 76%（F6）。
+    // 先用 3 个，等 F1~F5 把供给拉起来后再由下面的"库存自适应"自动加。
     quota.upgrader = containerized > 0
-        ? (level >= 5 ? 5 : 4)
+        ? (level >= 5 ? 4 : 3)
         : (level >= 1 ? 2 : 0);
 
     // 占领者：RCL3+ 就派（650 能量的 CLAIM 单位，相对 16 E/tick 的收入只是 3%）。

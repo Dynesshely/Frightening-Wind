@@ -89,22 +89,84 @@ function runSpawns(room, data) {
         return spawnSurplus(room, data, quota, free[0]);
     }
 
-    // RCL1 时优先"便宜、快"的小身体（[work,carry,move] 200 能量）：
-    // 省下的能量能让下一只 creep 早 100 tick 出生，铺人口比单体质量更重要
-    const budget = data.level <= 1
-        ? Math.min(room.energyAvailable, 200)
-        : room.energyAvailable;
+    // 孵化预算：目标不是"有多少花多少"，而是"攒到值得的身体再孵"。
+    // 旧实现用 room.energyAvailable（实测均值 120）当预算，永远只造得出 1W1C1M；
+    // 现在按 config.spawn.budget 给每个角色一个目标成本，不够就等（见 docs/OPTIMIZATION.md F1）。
+    const capacityAvailable = room.energyCapacityAvailable || 300;
+    const available = room.energyAvailable;
+    const spawnCfg = config.spawn || {};
+    const budgets = spawnCfg.budget || {};
 
-    // 按缺口比例依次尝试，某个兵种身体造不起就退到次优的，避免"该兵种永远造不出来"的死锁
+    if (!Memory.fw.spawnWait) Memory.fw.spawnWait = {};
+    if (!Memory.fw.spawnWait[room.name]) Memory.fw.spawnWait[room.name] = { t: 0, role: null };
+    const wait = Memory.fw.spawnWait[room.name];
+
+    // 保命模式：人口不足时"先补人"优先于"身体质量"。
+    // 线上实测：只按预算攒钱、不管人口，850 tick 内人口 17 → 6，采集链崩掉后更攒不到钱。
+    const population = (data.creeplist && data.creeplist.length) || 0;
+    const emergency = population < (spawnCfg.minPopulation || 12);
+    const baseBudget = emergency ? available : capacityAvailable;
+
+    // 保命模式下只补采集者：能量必须投在"能自我复制"的岗位，
+    // 先造升级者/建造者会把口粮分走，人口永远爬不起来。
+    let candidates = wanted;
+    if (emergency) {
+        const econ = wanted.filter(r => r === 'miner' || r === 'harvester');
+        if (econ.length) candidates = econ;
+    }
+
+    // 已经在为某个大身体攒钱、且人口够用：专心攒，不要再造便宜角色把能量花掉。
+    // 否则会出现"永远在等 600，却不停造 200 的兵"——攒钱状态被自己的孵化打断。
+    const pending = Memory.fw.spawnReserve && Memory.fw.spawnReserve[room.name];
+    if (pending && !emergency) {
+        const expired = Game.time - (pending.t || 0) > (spawnCfg.starveTicks || 90) * 2;
+        if (!expired && available < pending.need) return;
+    }
+
+    // 按缺口比例依次尝试：能量够得着哪个角色的目标成本，就造哪个
     let role = null;
     let body = null;
-    for (const candidate of wanted) {
+    for (const candidate of candidates) {
         const def = config.bodies[candidate];
-        const roleBudget = def && def.maxCost ? Math.min(budget, def.maxCost) : budget;
-        const b = utils.planBody(candidate, roleBudget);
+        if (!def) continue;
+        const want = budgets[candidate] || 0;
+        let target = Math.min(want > 0 ? want : baseBudget, baseBudget);
+        if (def.maxCost) target = Math.min(target, def.maxCost);
+        if (available < target) {
+            // 记下"正在为哪个角色攒钱"，fw.store 会据此决定暂停把能量继续灌进 spawn/扩展
+            if (!Memory.fw.spawnReserve) Memory.fw.spawnReserve = {};
+            if (!Memory.fw.spawnReserve[room.name]) {
+                Memory.fw.spawnReserve[room.name] = { need: target, role: candidate, t: Game.time };
+            } else {
+                Memory.fw.spawnReserve[room.name].need = Math.max(
+                    Memory.fw.spawnReserve[room.name].need, target);
+                Memory.fw.spawnReserve[room.name].role = candidate;
+            }
+            continue;
+        }
+        const b = utils.planBody(candidate, target);
         if (b) { role = candidate; body = b; break; }
     }
-    if (!body) return;
+
+    if (!body) {
+        // 所有角色都没攒够：先等着。但等过头就退化成"有多少造多少"，避免人口断档。
+        const minE = spawnCfg.minEnergy || 200;
+        if (available < minE) return;
+        const waited = wait.t ? (Game.time - wait.t) : 0;
+        if (waited < (spawnCfg.starveTicks || 240)) {
+            if (!wait.t) { wait.t = Game.time; wait.role = wanted[0] || null; }
+            return;
+        }
+        for (const candidate of candidates) {
+            const b = utils.planBody(candidate, available);
+            if (b) { role = candidate; body = b; break; }
+        }
+        if (!body) return;
+        console.log('[FW] ' + room.name + ' 攒钱超时（' + waited + ' tick），降级孵化 ' + role);
+    }
+    wait.t = 0;
+    wait.role = null;
+    if (Memory.fw.spawnReserve) delete Memory.fw.spawnReserve[room.name];
 
     const spawn = free[0];
     const name = role + '_' + spawn.name + '_' + Game.time;
@@ -169,7 +231,11 @@ function spawnSurplus(room, data, quota, spawn) {
     let total = 0;
     for (const role in data.creepsByRole) total += data.creepsByRole[role];
     if (total >= cap) return;
-    if (room.energyAvailable < capacity) return;
+    // 旧条件要求 spawn+扩展满仓（1300），实测存量只有 120，这个出口从没打开过。
+    // 现在只要求"够造一个像样的采集者"，富余本来就意味着配额已满。
+    const surplusFloor = Math.min(capacity, (config.spawn && config.spawn.budget
+        && config.spawn.budget.harvester) || 450);
+    if (room.energyAvailable < surplusFloor) return;
 
     const body = utils.planBody('harvester', room.energyAvailable);
     if (!body) return;

@@ -30,8 +30,20 @@ function hauler(creep, data) {
         return;
     }
 
-    // 取货：离得近的容器/仓储有能量就去搬（跳过控制器旁容器，那是升级者的口粮）
-    const store = utils.nearestEnergyStore(creep, data, 100, true);   // 阈值 100：少于这个量不值得跑一趟
+    // 取货前先看有没有白捡的（掉落物 / 墓碑 / 废墟）：
+    // 搬运工原来是全库唯一不碰散落能量的角色，阵亡单位的遗产全靠采集者顺路，
+    // 而采集者又只在空手时才会弯腰 —— 实际上大部分墓碑是被浪费掉的。
+    const loose = utils.nearestLooseEnergy(creep, data);
+    if (loose && creep.pos.getRangeTo(loose) <= 8) {
+        utils.transferFrom(creep, loose);
+        return;
+    }
+
+    // 取货阈值跟着自身运力走：低于"半车"才不值得跑。
+    // 旧值固定 100，而实测容器均值只有 75 —— 运输队大部分时间在等一整车，
+    // 这是 53% 空手率的主因（docs/OPTIMIZATION.md F2）。
+    const threshold = Math.max(30, Math.floor(capacity * 0.4));
+    const store = utils.nearestEnergyStore(creep, data, threshold, true);
     if (store) {
         utils.transferFrom(creep, store);
         return;
@@ -44,10 +56,12 @@ function hauler(creep, data) {
         utils.upgradeController(creep, data.room);
         return;
     }
-    // 没货可搬：回老家待命，别在矿区原地堵路（线上踩过：3 个搬运工把矿源通道堵死）
+    // 没货可搬：守在最近的转运容器旁等货，别跑回老家。
+    // 老家到远端容器一来一回 40+ tick，纯浪费时间——货就出在容器里，守着才接得到。
     utils.say(creep, '💤');
-    const idleSpot = data.storage || data.spawns[0];
-    if (idleSpot && creep.pos.getRangeTo(idleSpot) > 4) utils.moveTo(creep, idleSpot, { range: 4 });
+    const stash = utils.nearestEnergyStore(creep, data, 0, false);
+    const waitSpot = stash || data.storage || data.spawns[0];
+    if (waitSpot && creep.pos.getRangeTo(waitSpot) > 2) utils.moveTo(creep, waitSpot, { range: 2 });
 }
 
 module.exports = {

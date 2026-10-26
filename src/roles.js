@@ -100,6 +100,11 @@ function run(creep) {
     }
 
     const data = utils.roomData(creep.room);
+
+    // 临终交付：TTL 已经不够走完回程时，先把身上的能量处理掉再谈干活。
+    // 带着货死掉只能保住 20%（CREEP_CORPSE_RATE），主动倾倒是 100%。
+    if (utils.retire(creep, data)) return;
+
     const fn = BEHAVIORS[creep.memory.role] || harvesterMod.harvester;
     const before = creep.memory.lastSay;
     fn(creep, data);
