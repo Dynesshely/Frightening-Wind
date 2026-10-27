@@ -29,6 +29,12 @@ __all__ = [
     "CONTAINER_HITS", "STORAGE_CAPACITY", "TERMINAL_CAPACITY",
     "TERRAIN_FATIGUE", "SERVER", "ROOM", "parse_body", "body_cost", "body_size",
     "body_letters", "energy_per_hit_repair", "rcl_cumulative",
+    # 机制审计补全（见 MECHANICS.md D5/D11/D12/D16）
+    "SPAWN_ENERGY_START", "SPAWN_RENEW_RATIO", "CREEP_PART_MAX_ENERGY", "ENERGY_DECAY",
+    "TOMBSTONE_DECAY_PER_PART", "RUIN_DECAY", "MARKET_FEE", "TERMINAL_SEND_COST",
+    "LAB_REACTION_AMOUNT", "POWER_SPAWN_ENERGY_RATIO", "NUKER_COOLDOWN", "OBSERVER_RANGE",
+    "EXTRACTOR_COOLDOWN", "MINERAL_REGEN_TIME", "PORTAL_DECAY", "SAFE_MODE_COOLDOWN",
+    "DROP_DECAY_TIME", "CREEP_CORPSE_RATE", "PICKUP_RANGE",
 ]
 
 # ---------------------------------------------------------------- 1. 官方常数
@@ -129,6 +135,32 @@ TERMINAL_CAPACITY = 300_000
 
 #: 地形疲劳系数：官方 creeps.html §Movement 原文 "1 on roads, 2 on plain, 10 on swamp"
 TERRAIN_FATIGUE = {"road": 1, "plain": 2, "swamp": 10}
+
+# ---- 机制审计补全的常数（来源：screeps-docs/full/api.txt §Constants）----
+# 孵化与生命周期
+SPAWN_ENERGY_START = 300          # 新 spawn 的初始能量
+SPAWN_RENEW_RATIO = 1.2           # renewCreep 溢价：续 1 tick 生命要 1.2 能量
+CREEP_PART_MAX_ENERGY = 125       # 单部件在 creep 身上最多折合的能量（回收上限）
+CREEP_CORPSE_RATE = 0.2           # 死亡时只有 20% 资源变成墓碑
+# 衰减窗口
+ENERGY_DECAY = 1000               # 掉落能量每多少 tick 衰减
+DROP_DECAY_TIME = 1000            # 掉落物存活时长（文档未单列，与 ENERGY_DECAY 同源）
+TOMBSTONE_DECAY_PER_PART = 5      # 墓碑每部件每 tick 掉多少 hit
+RUIN_DECAY = 500                  # 废墟衰减
+PORTAL_DECAY = 30000              # 传送门存活
+MINERAL_REGEN_TIME = 50000        # 矿物再生周期
+EXTRACTOR_COOLDOWN = 5            # 提取器冷却
+# 市场
+MARKET_FEE = 0.05                 # 挂单手续费
+TERMINAL_SEND_COST = 0.1          # terminal 发送能量成本系数
+# 后期
+LAB_REACTION_AMOUNT = 5           # 一次 lab 反应产出
+POWER_SPAWN_ENERGY_RATIO = 50     # 1 power 需要 50 能量
+NUKER_COOLDOWN = 100000           # 核弹冷却
+OBSERVER_RANGE = 10               # 观察者视野
+SAFE_MODE_COOLDOWN = 50000        # 安全模式冷却
+# 交互半径
+PICKUP_RANGE = 1                  # pickup / transfer / withdraw 的有效距离
 
 # ---------------------------------------------------------------- 2. 私服环境
 SERVER = {

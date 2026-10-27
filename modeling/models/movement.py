@@ -83,17 +83,24 @@ def fig_body_heatmap():
         ax.grid(False)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
-        # 标出「1 tick/格」的临界线：n_MOVE >= w/2
-        ax.plot([0.5, 6.5], [1, 13], color=S.MORANDI["rose"], linewidth=1.4,
+        # 标出「刚好 1 tick/格」的临界线。判据是 2·n_MOVE ≥ w·c，即 w = 2·n_MOVE / c：
+        #   道路 c=1 → w = 2m（1 个 MOVE 顶 2 个部件）
+        #   平地 c=2 → w = m （1:1，官方原文 "as many MOVE parts as all the other parts combined"）
+        #   沼泽 c=10 → w = m/5
+        # MECHANICS D9：旧版一刀切写 w ≤ 2·n_MOVE，只在道路上成立；
+        # 平地会把往返时间低估 2 倍，这正是线上 31% 移动报 ERR_TIRED 的结构性原因。
+        c_here = P.TERRAIN_FATIGUE[key]
+        xs = np.array([moves[0] - 0.5, moves[-1] + 0.5])
+        ax.plot(xs, 2.0 * xs / c_here, color=S.MORANDI["rose"], linewidth=1.4,
                 linestyle=(0, (4, 3)))
         cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
         cb.set_label("tick / 格", fontsize=8)
         cb.outline.set_visible(False)
     axes[0].set_ylabel("其他部件数（WORK+CARRY+…）")
-    fig.suptitle("疲劳模型：走一格要几 tick（红线 = 刚好 1 tick/格）",
+    fig.suptitle("疲劳模型：走一格要几 tick（红线 = 刚好 1 tick/格，斜率随地形的 c 变化）",
                  fontsize=12, color=S.TEXT, y=1.02)
     return S.save(fig, "fig01_tile_ticks_heatmap",
-                  "w·c/(2·n_MOVE) 向上取整；空 CARRY 不计疲劳")
+                  "T = ceil(w·c/(2·n_MOVE))；满速需 2·n_MOVE ≥ w·c —— 平地是 1:1，不是 1:2")
 
 
 def fig_cargo_curve():

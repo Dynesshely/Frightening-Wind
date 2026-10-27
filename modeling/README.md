@@ -1,14 +1,33 @@
 # modeling —— Screeps 数学建模工具箱
 
-用 Python 复现游戏机制、量化殖民地瓶颈、生成决策依据。产出供 \`src/\` 的配额与调度逻辑使用。
+用 Python 复现游戏机制、量化殖民地瓶颈、生成决策依据。产出供 src/ 的配额与调度逻辑使用。
 
-> 公式推导与结论：[../docs/MODEL.md](../docs/MODEL.md)
+> **完整分析报告：[ANALYSIS.md](ANALYSIS.md)**（41 张图，逐条结论）
+> 公式推导：[../docs/MODEL.md](../docs/MODEL.md)
+> 机制出处：官方文档全站已抓取到辅助产物目录的 `screeps-docs/full/`，审计报告 `MECHANICS.md`
+
+## 分析结果一览
+
+![全部图表总览](output/overview.png)
+
+13 个模型、41 张图，分五个主题：
+
+| 主题 | 回答的问题 | 关键结论 |
+| --- | --- | --- |
+| **移动与空间** | 走一格要几 tick？ | 平地满速要 MOVE ≥ 权重（1:1），不是 1:2 —— 往返时间比旧模型长 1.5 倍 |
+| **人口与生命周期** | 续命还是重造？ | 两者单位 TTL 成本**完全相同**，差别只在 spawn 占用时间 |
+| **采集与运输** | 产出天花板在哪？ | source 没有饱和点，只有边际递减；link 吞吐是 hauler 的 20 倍 |
+| **建造与维护** | 维护要花多少？ | 参考配置 3.41 e/tick，其中 rampart 独占 3.00 —— 是当前收入的 3 倍 |
+| **防御与系统** | 塔要常开吗？ | 3 座塔全速 = 30 e/tick，是全部收入的 26 倍；**不该常开** |
+
+**一句话**：瓶颈是调度不是产能（16 个 WORK 只有 8% 时间在矿位上），
+而最大的隐性成本是维护税和塔的常开。
 
 ## 环境
 
 使用 DSH 内置 Python（已装 matplotlib / numpy / pandas）：
 
-    C:\Users\Dynesshely\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe
+    C:/Users/Dynesshely/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe
 
 或者：
 
@@ -17,70 +36,53 @@
 ## 运行
 
     cd modeling
-    python run_all.py            # 跑全部模型，生成 modeling/output/*.png
+    python run_all.py            # 跑全部 13 个模型，生成 output/*.png（41 张）
 
 单跑某个模型：
 
     python -m models.movement
-    python -m models.mining
+    python -m models.audit
 
 ## 目录
 
     modeling/
       mw/                 公共包
-        params.py         参数唯一来源（官方常数 / 私服环境 / 房间实测）
+        params.py         参数唯一来源（80 个常量，已与官方 Constants 逐项核对）
         style.py          莫兰迪色系 + 中文排版 + 保存规则
       models/             每个文件一个主题，含 main() 与出图
-      output/             生成的图表（*.png，21 张）
+      output/             生成的图表（41 张 + overview 拼图）
+      ANALYSIS.md         完整分析报告
       run_all.py          批量运行
 
-## 模型与产物
+## 模型清单
 
 | 模块 | 主题 | 核心公式 | 图 |
 | --- | --- | --- | --- |
-| \`movement.py\` | 疲劳与速度 | T(g) = ceil(w·c(g) / (2·n_MOVE)) | fig01–03 |
-| \`economy.py\` | 人口成本 | 摊销 = cost/1500；净产出 = 2·n_WORK·η − 摊销 | fig10–12 |
-| \`mining.py\` | 采集 | Y(n) = 10n/(5+n) | fig20–22 |
-| \`logistics.py\` | 运输 | Thr = 50·n_CARRY / (T_空+T_满+2) | fig30–32 |
-| \`growth.py\` | RCL / GCL | T = (progressTotal − progress) / ṗ | fig40–42 |
-| \`defense.py\` | 塔与围墙 | sigma(r) = clamp(1 − 0.75(r−5)/15, 0.25, 1) | fig50–52 |
-| \`optimize.py\` | 综合配置 | 净 = min(采集, 运输) − 摊销 | fig60–62 |
+| movement.py | 疲劳与速度 | T(g) = ceil(w·c(g) / (2·n_MOVE)) | fig01–03 |
+| economy.py | 人口成本 | 摊销 = cost/1500；净产出 = 2·n_WORK·η − 摊销 | fig10–12 |
+| mining.py | 采集 | Y(n;Q) = Q / (Q/(2n) + 300) | fig20–22 |
+| logistics.py | 运输 | Thr = 50·n_CARRY / (T_空 + T_满 + 2) | fig30–32 |
+| growth.py | RCL / GCL | T = (progressTotal − progress) / ṗ | fig40–42 |
+| defense.py | 塔与围墙 | sigma(r) = clamp(1 − 0.75(r−5)/15, 0.25, 1) | fig50–52 |
+| optimize.py | 综合配置 | 净 = min(采集, 运输) − 摊销 | fig60–62 |
+| audit.py | 官方文档偏差审计 | 按 D1–D16 独立重算 | fig70–74 |
+| lifecycle.py | 人口生命周期 | 孵化 3N tick / renew / recycle | fig80–82 |
+| upkeep.py | 折旧与维护 | container 10~50、rampart 3、road 含交通项；link 776/d | fig83–85 |
+| market.py | 市场与后期 | 运费随距离指数上升、5% 手续费、boost 增益 | fig86–88 |
+| combat.py | 战斗与入侵 | 部件级失效；每 10 万采出能量一次入侵 | fig90–92 |
+| systems.py | 系统层 | bucket 换 pixel；PathFinder 代价低估 2 倍 | fig93–95 |
 
-### 图表索引
-
-| 文件 | 内容 |
-| --- | --- |
-| \`fig01_tile_ticks_heatmap\` | MOVE 数 × 其他部件数 → 每格 tick（三种地形） |
-| \`fig02_speed_vs_cargo\` | 载重比例 → 速度（空 CARRY 不计疲劳） |
-| \`fig03_room_trip_ticks\` | 本房间两个 source 的往返 tick（修路前后） |
-| \`fig10_body_tradeoff\` | 造价 / 生成时间 / 摊销 / 净产出 |
-| \`fig11_eta_sensitivity\` | 有效工时占比 η → 净产出（含盈亏平衡点） |
-| \`fig12_population_cost\` | 当前 13 个兵的成本构成 |
-| \`fig20_source_yield\` | 矿工数 → 稳态产出与边际产出（盈亏平衡 n≈22） |
-| \`fig21_regen_sawtooth\` | source 库存锯齿（1/3/5/10 个 WORK） |
-| \`fig22_room_gap\` | 单 source 产出曲线 + 本房间当前位置 |
-| \`fig30_hauler_throughput\` | 距离 → 单 hauler 吞吐（有路/无路） |
-| \`fig31_haulers_needed\` | 距离 → 喂满目标速率需要几个 hauler |
-| \`fig32_road_payback\` | 修路回本时间 |
-| \`fig40_rcl_curve\` | 各 RCL 的 progressTotal 与累计能量 |
-| \`fig41_time_to_rcl5\` | 升级速率 → 到 RCL5 的墙钟时间 |
-| \`fig42_income_vs_rcl\` | 四种收入场景下到 RCL5/6/7 的时间 |
-| \`fig50_tower_falloff\` | 距离 → 伤害 / 治疗 / 修理 / 每能量伤害 |
-| \`fig51_maintenance_tax\` | rampart / road 段数 → 维护能量 |
-| \`fig52_siege_time\` | 击杀 5000 hit 目标所需 tick |
-| \`fig60_config_heatmap\` | 矿工 × hauler 配置空间的净升级速率 |
-| \`fig61_current_vs_best\` | 当前 vs 最优（能量流转与 RCL5 时间） |
-| \`fig62_action_priority\` | 行动优先级（每 1000 能量的收益） |
+每张图的详细解读（公式、出处、结论）见 **[ANALYSIS.md](ANALYSIS.md)**。
 
 ## 约定
 
-* **不在模型里写魔法数字**：所有常数从 \`mw.params\` 取。
-* **图表统一莫兰迪**：用 \`mw.style\` 的 \`figure()\` / \`save()\` / \`SEQ\`，不要自己调色。
+* **不在模型里写魔法数字**：所有常数从 mw/params.py 取。
+* **图表统一莫兰迪**：用 mw/style.py 的 figure() / save() / SEQ，不要自己调色。
 * 每个模型都能独立运行，并在 stdout 打印关键数字。
 
 ## 模型已知边界
 
-* 采集模型给的是**稳态上限**，不含移动时间与调度损耗；
-  实测链路效率 η ≈ 39%（1.13 / 2.90），差距就是执行损耗，这也是 \`src/\` 需要优化的部分。
+* 采集模型给的是**稳态上限**，不含移动时间与调度损耗（实测链路效率 η ≈ 8~39%）。
 * 运输模型假设 hauler 只要往返，不计排队与抢位。
 * 优化模型的"最优配置"是**配置维度**的最优，不解决代码实现层面的忙等与空转。
+* 市场模型里的价格、boost 成品价、运费指数都是**参数**，不是实测值。

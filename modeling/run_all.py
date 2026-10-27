@@ -12,7 +12,9 @@ import sys
 import time
 
 MODULES = ["movement", "economy", "mining", "logistics",
-           "growth", "defense", "optimize"]
+           "growth", "defense", "optimize", "audit",
+           # 2026-10-27 依据 MECHANICS.md 新增的五个专题
+           "lifecycle", "upkeep", "combat", "market", "systems"]
 
 
 def main() -> int:
