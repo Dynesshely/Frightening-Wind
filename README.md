@@ -39,7 +39,7 @@ Frightening-Wind 是一个为 [Screeps World](https://screeps.com) 编写的**�
 - **独占站位采矿**：每个矿工分配专属站位格，同矿源矿工互不抢位，彻底消除排队空转
 - **地形感知定编**：按矿源周围可站格数（`min(可站位数, 2)`）决定编制，而非固定人数
 - **两级远程运输**：远程矿工就地倾倒容器 + 接驳工批量回运，把 70 格往返拆成"站定 + 短途"
-- **距离感知限价**：远程兵种自动降档到能效最优点（模型见 [`analysis/`](analysis/)）
+- **距离感知限价**：远程兵种自动降档到能效最优点（模型见 [`modeling/`](modeling/)）
 - **工作状态机**：`working` 状态贯穿所有角色，杜绝"采集↔交付"抖动
 
 ### 防御与军事
@@ -64,21 +64,26 @@ Frightening-Wind 是一个为 [Screeps World](https://screeps.com) 编写的**�
 
 ## 📊 数据模型
 
-参数不是拍脑袋定的，两个关键模型都在 [`analysis/`](analysis/) 里，可复现、可调整。
+![全部图表总览](modeling/output/overview.png)
 
-### 采矿编制平衡：距离决定身体尺寸
+**13 个模型、41 张图**，全部依据 [官方文档](https://docs.screeps.com/) 逐条核对后重建，
+可在 `modeling/` 下用 `python run_all.py` 复现（约 6 秒）。
 
-<img src="analysis/mining_balance.png" alt="采矿编制平衡" width="100%" />
+三条最影响决策的结论：
 
-> 近处（≤20 格）用大身体摊薄采集时间；40 格之后堆身体收益趋零，只能靠**数量密度**。
-> 落地：`config.js` 中远程采集者限价 450、远程接驳工限价 500，本地兵种不设限。
+| 结论 | 数字 |
+| --- | --- |
+| **满速判据** | 平地需要 MOVE ≥ 权重（1:1），1:2 只在道路上成立 —— 往返时间比旧模型长 1.5 倍 |
+| **维护税** | 参考配置 3.41 E/tick，其中 rampart 独占 3.00，是当前收入的 3 倍 |
+| **塔的代价** | 3 座塔全速运转 = 30 E/tick，是当前全部收入的 26 倍，因此不能常开 |
 
-### Spawn 门槛：供给能力 vs 生产能力
+其他值得注意的：
+- source 容量分三档（中立 1500 / 已占 3000 / 中心房 4000），远程房天花板只有一半；
+- 续命与重造的单位 TTL 成本**完全相同**，差别只在 spawn 占用时间；
+- 采集 boost 是亏的、升级 boost 是赚的（采集受 source 再生速率封顶）；
+- 结余 CPU 换成 pixel 约 **116 个/小时**，之前完全没利用。
 
-<img src="analysis/spawn_threshold.png" alt="Spawn 门槛" width="100%" />
-
-> 单 spawn 的制造吞吐上限约 **22~33 E/tick**。新建 Spawn 的门槛 = `在役上限 × 造价 / (k × 1500)`：
-> 800 能量身体约 **59.3 E/tick**（约 6 个矿源）。在那之前扩军只会亏在换代成本上。
+完整的公式推导、逐图解读与行动优先级见 **[modeling/ANALYSIS.md](modeling/ANALYSIS.md)**。
 
 ---
 
@@ -164,11 +169,19 @@ pwsh -File tools/deploy.ps1
 ```
 .
 ├── src/                    # 机器人运行时代码（唯一会被同步到游戏的部分）
-├── analysis/               # 离线建模脚本与产出图表
+├── modeling/               # 数学建模（13 个模型 / 41 张图，依据官方文档重建）
+│   ├── mw/params.py        # 参数唯一来源（80 个常量，与官方 Constants 核对过）
+│   ├── mw/style.py         # 莫兰迪配色与绘图工具
+│   ├── models/             # 每个文件一个主题
+│   ├── output/             # 图表产出（含 overview.png 总览拼图）
+│   ├── ANALYSIS.md         # 完整分析报告
+│   └── run_all.py          # 一键复现
+├── analysis/               # 早期建模（保留作历史对照，已被 modeling/ 取代）
 │   ├── mining_balance.py   # 采矿编制平衡模型
 │   ├── spawn_threshold.py  # Spawn 门槛模型
 │   ├── *.png               # 对应图表
 │   └── FINDINGS.md         # 经济分析报告
+├── docs/                   # ARCHITECTURE / MODEL / OPTIMIZATION 等文档
 ├── docs/banner.png         # README 横幅
 ├── tools/                  # 同步脚本（deploy.ps1 不入库，仅保留 example）
 ├── .gitignore
