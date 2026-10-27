@@ -33,6 +33,10 @@ const quotaMod = require('quota');
 const roomMgr = require('mgr.room');
 const spawnMgr = require('mgr.spawn');
 const rosterMgr = require('mgr.roster');
+// V2 预算驱动架构（docs/ARCHITECTURE_V2.md）。config.core.v2=false 时这三个模块完全不参与。
+const ledger = require('core.ledger');
+const budgetMod = require('core.budget');
+const policyMod = require('core.policy');
 
 /* ------------------------------ 全局清理 ------------------------------ */
 
@@ -109,6 +113,71 @@ function ownedRooms() {
     return rooms;
 }
 
+/* ------------------------------ V2 预算驱动 ------------------------------ */
+
+/**
+ * 每 tick 记录账本并求解配置（docs/ARCHITECTURE_V2.md 第 4、5、7 节）。
+ *
+ * 只在 config.core.v2 为真时运行；关闭时一个字段都不写，行为与重构前完全一致。
+ * 产出 data.v2plan = { roles, bodies, etaMode, upkeepCap, target }，供 mgr.spawn 使用。
+ */
+function runCore(room, data) {
+    if (!config.core || !config.core.v2) return;
+    try {
+        const entry = buildLedgerEntry(room, data);
+        ledger.record(room.name, entry);
+        const snap = ledger.snapshot(room.name);
+        const bud = budgetMod.allocate(room, data, snap);
+        const plan = policyMod.plan(room, data, snap, bud);
+        data.v2snap = snap;
+        data.v2budget = bud;
+        data.v2plan = plan;
+    } catch (e) {
+        // 决策层出错不能拖垮经济：记录一次并回退到旧配额
+        if (!Memory.fw) Memory.fw = {};
+        if (!Memory.fw.v2Errors) Memory.fw.v2Errors = [];
+        Memory.fw.v2Errors.push({ t: Game.time, m: String(e && e.message || e) });
+        if (Memory.fw.v2Errors.length > 20) Memory.fw.v2Errors.shift();
+        data.v2plan = null;
+    }
+}
+
+/**
+ * 构造一条账本流水。
+ *
+ * 收入用 Memory.fw.ct 的累计计数差值反推（每次 harvest 产出 2 能量），
+ * 支出暂时只统计"库存净变化"能解释的部分 —— 更精确的分项等实测校准后再补。
+ */
+function buildLedgerEntry(room, data) {
+    const ct = (Memory.fw && Memory.fw.ct) || {};
+    if (!Memory.fw.counters) Memory.fw.counters = {};
+    const p = Memory.fw.counters;
+    const last = p[room.name] || { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0 };
+    const dHarvest = Math.max(0, (ct.harvest || 0) - (last.harvest || 0));
+    const dUpgrade = Math.max(0, (ct.upgrade || 0) - (last.upgrade || 0));
+    p[room.name] = { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0 };
+
+    let stored = 0;
+    for (const s of data.spawns) stored += s.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+    for (const e of data.extensions) stored += e.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+    for (const c of data.containers) stored += c.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+    if (data.storage) stored += data.storage.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+
+    let carried = 0;
+    let workActive = 0;
+    for (const c of data.creeplist) {
+        carried += c.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+        for (const part of (c.body || [])) if (part.type === WORK) workActive++;
+    }
+
+    return {
+        income: { harvest: dHarvest * 2, passive: 0, link: 0 },
+        // 升级按 1 能量 : 1 progress 折算；其余分项暂未接线
+        spend: { spawn: 0, upkeep: 0, upgrade: dUpgrade * 1, build: 0, tower: 0 },
+        state: { stored: stored + carried, creepCount: data.creeplist.length, workActive: workActive },
+    };
+}
+
 /* ------------------------------ 房间主流程 ------------------------------ */
 
 /**
@@ -126,6 +195,9 @@ function runRoom(room) {
     // 巡逻规模、最近来敌方位、"老家被袭"信号
     roomMgr.recordThreatSignals(room, data);
     rosterMgr.rebalanceRoles(room, data);      // 容器体系建好后，把多余的自采工人转成矿工/搬运工
+
+    // V2：账本 → 预算 → 配置求解。结果挂在 data.v2plan 上，由 mgr.spawn 消费。
+    runCore(room, data);
 
     // 诊断信息（每 50 tick 写一次 Memory，外部可读）
     roomMgr.writeDiag(room, data);

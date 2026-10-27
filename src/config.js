@@ -222,4 +222,31 @@ module.exports = {
         // 线上实测过：侦察兵在 W7N2(0,37) 与 W8N2(49,37) 之间每 2 tick 往返一次，持续几百 tick。
         roomEntryDepth: 8,
     },
+
+    // ---- V2 预算驱动架构（docs/ARCHITECTURE_V2.md）----
+    // 灰度开关：false 时完全走旧的 quota / economy 路径，行为与重构前一致。
+    // 所有 core.* 模块都从这里取参数，**不要在别处写死阈值**。
+    core: {
+        v2: false,
+
+        // L0 账本：滑动窗口长度（tick）与 Memory 里最多保留的样本数
+        ledgerWindow: 300,
+
+        // L1/L2 的 η 闸门：低于 optimize 时禁止扩军（只优化动线），高于 expand 才允许加人
+        etaOptimize: 0.4,
+        etaExpand: 0.75,
+
+        // 维护负债占收入的比例上限；超过就要求 policy 输出更小的 upkeepCap
+        upkeepRatio: 0.3,
+        // 各类结构单件维护成本（e/tick），用于把"能养多少"反解成数量上限
+        // 依据 modeling/fig83：rampart 0.03 / container(有主) 0.10 / road(平地,时间项) 0.0015
+        upkeepUnit: { rampart: 0.03, container: 0.10, road: 0.0015 },
+
+        // 预算分配比例（扣掉维护之后的部分）
+        budgetShare: { spawn: 0.5, upgrade: 0.3, build: 0.15, defense: 0.05 },
+
+        // L3 任务队列
+        taskLimit: 50,
+        taskTtl: 300,
+    },
 };

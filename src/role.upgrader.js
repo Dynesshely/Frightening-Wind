@@ -45,13 +45,14 @@ function pickUpgradeSupply(creep, data) {
         if (best) { utils.transferFrom(creep, best); return true; }
     }
 
-    // 3) 兜底：控制器容器还没建成时，可以从任意容器取，但留一点给搬运工。
-    //    阈值必须贴近实际情况：容器长期只有 40~80，设 150 等于永远取不到货，
-    //    升级直接停摆（线上实测 progress 卡死 1200+ tick）。
+    // 3) 兜底：控制器旁还没有容器时，可以从任意容器取，但**按"总路程"挑**而不是"离自己近"。
+    //    真正付出去的是"走到容器 + 从容器走回控制器"这一段，离自己近不代表划算。
+    //    （本地推演实测：容器在离控制器 8~12 格处，升级者每趟只升 50 点，效率掉到 5%）
     for (const c of data.containers) {
         if (utils.usedEnergy(c) < 30) continue;
-        const d = creep.pos.getRangeTo(c);
-        if (d < bestDist) { bestDist = d; best = c; }
+        const toCtrl = controller ? c.pos.getRangeTo(controller) : 0;
+        const score = creep.pos.getRangeTo(c) + toCtrl * 1.5;
+        if (score < bestDist) { bestDist = score; best = c; }
     }
     if (best) { utils.transferFrom(creep, best); return true; }
 

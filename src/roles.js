@@ -15,7 +15,8 @@
  * 本文件只保留三件事：
  *   1. run() 的跨角色分发：拆障任务 → 回收任务 → 按角色调用 BEHAVIORS；
  *   2. BEHAVIORS 注册表（键名与拆分前完全一致，拼装顺序也不变）；
- *   3. ★ 发呆兜底（config.idleTicksBeforeHome）—— 见 run() 里的注释，逻辑一字未改。
+ *   3. ★ 发呆兜底（config.idleTicksBeforeHome）—— 见 run() 里的注释，逻辑一字未改；
+ *   4. L3 任务层 hook（config.core.v2 打开时先问 core.task，关闭时这 6 行完全不产生调用）。
  *
  * 不该放进来：任何具体角色策略（去对应的 role.*.js）、战术与配额（quota / war），
  * 也不要在这里 require 上层模块（economy / main），避免循环依赖。
@@ -24,6 +25,7 @@
 const config = require('config');
 const utils = require('utils');
 
+const task = require('core.task');
 const harvesterMod = require('role.harvester');
 const minerMod = require('role.miner');
 const haulerMod = require('role.hauler');
@@ -105,9 +107,17 @@ function run(creep) {
     // 带着货死掉只能保住 20%（CREEP_CORPSE_RATE），主动倾倒是 100%。
     if (utils.retire(creep, data)) return;
 
+    // L3 任务层（ARCHITECTURE_V2 §7）：v2 打开时先问任务队列，任务没接手才走角色行为。
+    // 刻意不 return：任务接手后仍要跑末尾的发呆兜底，否则"站边界不动"会从任务路径绕回来。
+    let handled = false;
+    if (config.core && config.core.v2) {
+        const picked = task.pick(creep, data);
+        handled = !!(picked && task.exec(creep, picked, data));
+    }
+
     const fn = BEHAVIORS[creep.memory.role] || harvesterMod.harvester;
     const before = creep.memory.lastSay;
-    fn(creep, data);
+    if (!handled) fn(creep, data);
 
     // ---- 发呆兜底 ----
     // 判定"这一 tick 完全没有产出"：位置没变，提示语也没换。

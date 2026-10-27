@@ -72,7 +72,11 @@ function runSpawns(room, data) {
     const free = data.spawns.filter(s => !s.spawning);
     if (!free.length) return;
 
-    const quota = quotaMod.computeQuota(room, data);
+    // V2 架构下由 core.policy 给出目标人数；关闭时走旧的配额表
+    const useV2 = !!(config.core && config.core.v2 && data.v2plan && data.v2plan.roles);
+    const quota = useV2
+        ? Object.assign({}, data.v2plan.roles)
+        : quotaMod.computeQuota(room, data);
     const wanted = quotaMod.pickSpawnRole(data, quota);
 
     // 总数上限：人太多会吃掉全部能量用于更新换代。
@@ -109,8 +113,11 @@ function runSpawns(room, data) {
 
     // 保命模式下只补采集者：能量必须投在"能自我复制"的岗位，
     // 先造升级者/建造者会把口粮分走，人口永远爬不起来。
+    // 保命模式：人口不足时优先补采集者。
+    // 但 v2 架构下 core.policy 已经按预算算过人数与优先级，这层过滤是重复的，
+    // 而且会在"采集者已满、缺的是升级者"时把 candidates 裁空（线上本地推演踩过）。
     let candidates = wanted;
-    if (emergency) {
+    if (emergency && !useV2) {
         const econ = wanted.filter(r => r === 'miner' || r === 'harvester');
         if (econ.length) candidates = econ;
     }
@@ -129,10 +136,20 @@ function runSpawns(room, data) {
     for (const candidate of candidates) {
         const def = config.bodies[candidate];
         if (!def) continue;
+        // V2：policy 已经把"目标体型的完整 body 数组"算好了（含 1:1 的 MOVE 配比），
+        // 这里只需要确认能量够付得起。
+        if (useV2 && data.v2plan.bodies && data.v2plan.bodies[candidate]) {
+            const fixed = data.v2plan.bodies[candidate];
+            const cost = utils.bodyCost(fixed);
+            if (available >= cost) { role = candidate; body = fixed; break; }
+            continue;
+        }
         const want = budgets[candidate] || 0;
         let target = Math.min(want > 0 ? want : baseBudget, baseBudget);
         if (def.maxCost) target = Math.min(target, def.maxCost);
-        if (available < target) {
+        // 差一点点也放行：线上实测 spawn+扩展 448、预算 450，只差 2 点就卡死整个孵化。
+        // 放行后用"实际可用能量"拼身体（会自动降一档），比干等更划算。
+        if (available < target * 0.95) {
             // 记下"正在为哪个角色攒钱"，fw.store 会据此决定暂停把能量继续灌进 spawn/扩展
             if (!Memory.fw.spawnReserve) Memory.fw.spawnReserve = {};
             if (!Memory.fw.spawnReserve[room.name]) {
@@ -144,7 +161,7 @@ function runSpawns(room, data) {
             }
             continue;
         }
-        const b = utils.planBody(candidate, target);
+        const b = utils.planBody(candidate, Math.min(target, available));
         if (b) { role = candidate; body = b; break; }
     }
 
