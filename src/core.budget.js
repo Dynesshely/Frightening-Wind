@@ -31,6 +31,11 @@ const config = require('config');
 const DEFAULTS = {
     budgetShare: { spawn: 0.5, upgrade: 0.3, build: 0.15, defense: 0.05 },
     upkeepRatio: 0.3,
+    // 冷启动：账本样本不足时 net 恒为 0，直接用它会把所有预算压成 0 →
+    // 不造升级者 → 不升级 → 账本永远没收入 → 锁死（本地推进实测 progress 恒为 0）。
+    // 观测不到的时候必须乐观：按"每个 source 保守 3 e/tick"给一个基准。
+    warmupSamples: 30,
+    optimisticPerSource: 3,
 };
 
 function coreCfg() {
@@ -78,7 +83,13 @@ function r4(x) {
  */
 function allocate(room, data, snap) {
     const s = snap || {};
-    const total = r4(pick(s.net, 0));                       // 窗口净收入（可能为负）
+    const samples = pick(s.samples, 0);
+    const warm = samples >= DEFAULTS.warmupSamples;
+    const srcCount = Math.max(1, (data && data.sources && data.sources.length) || 1);
+
+    // 冷启动期（样本不足）用乐观基准顶替净收入，避免"没观测 → 没预算 → 没产出 → 没观测"的死锁
+    const optimistic = r4(Math.max(2, srcCount * DEFAULTS.optimisticPerSource));
+    const total = warm ? r4(pick(s.net, 0)) : optimistic;
     const upkeep = r4(Math.max(0, pick(s.upkeepDebt, 0)));  // 维护负债是硬约束，恒非负
 
     // 可支配部分：先扣维护，再按比例分。total 为负时全部为 0（收缩模式）。
@@ -87,7 +98,7 @@ function allocate(room, data, snap) {
 
     // 超预算判定：净收入为负，或者维护吃掉的比例超过 upkeepRatio（默认 30%）。
     // 维护是"不做就会烂掉"的支出，所以它超限时不是砍维护，而是要求 policy 砍别的东西。
-    const overBudget = total <= 0 || upkeep > total * ratio;
+    const overBudget = (warm && total <= 0) || upkeep > total * ratio;
 
     const sh = shareOf();
     const hasSites = !!(data && data.sites && data.sites.length > 0);

@@ -150,12 +150,19 @@ function runCore(room, data) {
  */
 function buildLedgerEntry(room, data) {
     const ct = (Memory.fw && Memory.fw.ct) || {};
+    // ★ 计数器键名是 fw.log 白名单里的 'work.harvest' / 'work.upgrade' / 'work.build'，
+    //   不是裸的 harvest/upgrade/build。曾用错键名导致 income 恒为 0 →
+    //   预算恒为 0 → 不造升级者 → 本地推演 progress 卡死 8 分钟（三个修复都没救回来）。
+    const ctHarvest = ct['work.harvest'] || ct.harvest || 0;
+    const ctUpgrade = ct['work.upgrade'] || ct.upgrade || 0;
+    const ctBuild = ct['work.build'] || ct.build || 0;
+
     if (!Memory.fw.counters) Memory.fw.counters = {};
     const p = Memory.fw.counters;
-    const last = p[room.name] || { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0, build: ct.build || 0 };
-    const dHarvest = Math.max(0, (ct.harvest || 0) - (last.harvest || 0));
-    const dUpgrade = Math.max(0, (ct.upgrade || 0) - (last.upgrade || 0));
-    p[room.name] = { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0, build: ct.build || 0 };
+    const last = p[room.name] || { harvest: ctHarvest, upgrade: ctUpgrade, build: ctBuild };
+    const dHarvest = Math.max(0, ctHarvest - (last.harvest || 0));
+    const dUpgrade = Math.max(0, ctUpgrade - (last.upgrade || 0));
+    p[room.name] = { harvest: ctHarvest, upgrade: ctUpgrade, build: ctBuild };
 
     let stored = 0;
     for (const s of data.spawns) stored += s.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
@@ -186,8 +193,7 @@ function buildLedgerEntry(room, data) {
         : Math.max(0, prev + incomeHarvest - storedNow);
 
     // 已知分项：升级是 1:1；建造按"每次 build 调用消耗 1 能量"近似（1 WORK 建 5 hit / 5 能量）
-    const dBuild = Math.max(0, (ct.build || 0) - (last.build || 0));
-    p[room.name].build = ct.build || 0;
+    const dBuild = Math.max(0, ctBuild - (last.build || 0));
     const spendUpgrade = Math.min(spendTotal, dUpgrade);
     const spendBuild = Math.min(spendTotal - spendUpgrade, dBuild);
     const spendOther = Math.max(0, spendTotal - spendUpgrade - spendBuild);

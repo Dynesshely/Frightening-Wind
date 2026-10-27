@@ -82,7 +82,13 @@ function canDo(creep, role) {
  * 好处是岗位空缺立刻补上，不用等 spawn 造人（造人要 3*部件数 tick + 攒能量）。
  */
 function rebalanceRoles(room, data) {
-    const quota = quotaMod.computeQuota(room, data);
+    // V2 架构下角色目标由 core.policy 给出。这里如果还用旧配额表，
+    // 会出现"spawn 按 v2 的低编制造人、roster 按旧的高编制转职/回收"的内耗 ——
+    // 本地推演实测：spawn 100% 忙、人口卡在 4、progress 恒为 0。
+    const useV2 = !!(config.core && config.core.v2 && data.v2plan && data.v2plan.roles);
+    const quota = useV2
+        ? Object.assign({}, data.v2plan.roles)
+        : quotaMod.computeQuota(room, data);
     const have = n => utils.countRole(data, n);
 
     // 每个角色不能被抽空的下限

@@ -256,8 +256,14 @@ function plan(room, data, snap, bud) {
     const capacity = (room && room.energyCapacityAvailable) || 300;
 
     /* ---- 1. η 模式：低 η 或超预算时只优化动线，禁止扩军 ---- */
-    const eta = Math.max(0, Math.min(1, cfgNum(s.eta, 1)));
-    const shrink = !!(b && (b.overBudget || b.total <= 0));
+    // 冷启动保护：账本还没有样本时，eta/net 都是 0。如果照此决策，
+    // policy 会判定"房间在休克"→ 锁死人数 → 永远起不来（本地推演实测：重置后
+    // 8 分钟 progress 恒为 0、spawn 100% 忙却人口不涨）。
+    // 观测不到的时候要**乐观**，观测到了再按实数收紧。
+    const sampleCount = Math.max(0, cfgNum(s.samples, 0));
+    const etaKnown = sampleCount >= DEFAULTS.warmupSamples;
+    const eta = etaKnown ? Math.max(0, Math.min(1, cfgNum(s.eta, 1))) : 1;
+    const shrink = etaKnown && !!(b && (b.overBudget || b.total <= 0));
     const etaMode = (eta < cfgNum(c.etaOptimize, DEFAULTS.etaOptimize) || shrink) ? 'optimize' : 'expand';
 
     /* ---- 2. 目标产出：该 RCL 的档位；收缩时乘 shrinkRatio（不低于 minTargetRatio） ---- */
