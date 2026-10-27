@@ -121,7 +121,7 @@ function harvestSource(creep, data) {
     say(creep, '⛏');
     const hr = creep.harvest(source);
     if (hr === OK) bump('harvest');
-    else if (hr === ERR_NOT_IN_RANGE) moveTo(creep, source);
+    else if (hr === ERR_NOT_IN_RANGE) moveTo(creep, source, { range: 1 });   // source 格不可站
     else bump('harvestErr_' + hr);
     return true;
 }
@@ -200,13 +200,49 @@ function withdrawEnergy(creep, data) {
     return false;
 }
 
+/**
+ * 给"要贴上去交互"的建筑挑一个落脚格。
+ *
+ * 为什么需要：transfer/withdraw 要求 range ≤ 1，而建筑自身那格站不上去。
+ * 用 moveTo(target, {range:1}) 时引擎会自己找一个邻格，但**多个 creep 会选同一格**，
+ * 于是出现"两个单位在 (24,35) 和 (25,34) 之间来回摆、谁都进不了 range 1"的死循环
+ * （本地推演实测：upgrader/hauler 每 3~4 tick 互换一次位置，8 分钟零产出）。
+ * 这里按 creep 名字哈希在最近的几个邻格里选，把站位错开。
+ */
+function approachSpot(creep, target) {
+    const room = target.room;
+    if (!room || !target.pos) return null;
+    let terrain;
+    try { terrain = room.getTerrain(); } catch (e) { return null; }
+    const spots = [];
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            if (!dx && !dy) continue;
+            const x = target.pos.x + dx;
+            const y = target.pos.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+            spots.push({ x: x, y: y, d: creep.pos.getRangeTo(x, y) });
+        }
+    }
+    if (!spots.length) return null;
+    spots.sort((a, b) => a.d - b.d);
+    let h = 0;
+    for (let i = 0; i < creep.name.length; i++) h = (h * 31 + creep.name.charCodeAt(i)) & 0xffff;
+    const pick = spots[Math.min(h % 3, spots.length - 1)];
+    return new RoomPosition(pick.x, pick.y, room.name);
+}
+
 function transferFrom(creep, target) {
     say(creep, '📦');
     // 地上的掉落物只能用 pickup()，withdraw 会返回 ERR_INVALID_TARGET
     const isDropped = target && !target.store;
     const r = isDropped ? creep.pickup(target) : creep.withdraw(target, RESOURCE_ENERGY);
     if (r === ERR_NOT_IN_RANGE) {
-        moveTo(creep, target);
+        // ★ 走到"建筑的可站邻格"，并且按名字错开，避免多个单位抢同一格互相顶。
+        const spot = approachSpot(creep, target);
+        if (spot) moveTo(creep, spot);
+        else moveTo(creep, target, { range: 1 });
         return true;
     }
     if (r === OK) bump('withdraw');
@@ -287,7 +323,9 @@ function transferTo(creep, target) {
     say(creep, '🚚');
     const r = creep.transfer(target, RESOURCE_ENERGY);
     if (r === ERR_NOT_IN_RANGE) {
-        moveTo(creep, target);
+        const spot = approachSpot(creep, target);
+        if (spot) moveTo(creep, spot);
+        else moveTo(creep, target, { range: 1 });
         return true;
     }
     if (r === OK) bump('transfer');
@@ -363,7 +401,7 @@ function retire(creep, data) {
 
     if (spot && ttl >= need) {
         say(creep, '🏁');
-        moveTo(creep, spot);
+        moveTo(creep, spot, { range: 1 });
         return true;
     }
 
