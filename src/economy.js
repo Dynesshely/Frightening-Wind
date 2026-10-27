@@ -152,10 +152,10 @@ function buildLedgerEntry(room, data) {
     const ct = (Memory.fw && Memory.fw.ct) || {};
     if (!Memory.fw.counters) Memory.fw.counters = {};
     const p = Memory.fw.counters;
-    const last = p[room.name] || { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0 };
+    const last = p[room.name] || { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0, build: ct.build || 0 };
     const dHarvest = Math.max(0, (ct.harvest || 0) - (last.harvest || 0));
     const dUpgrade = Math.max(0, (ct.upgrade || 0) - (last.upgrade || 0));
-    p[room.name] = { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0 };
+    p[room.name] = { harvest: ct.harvest || 0, upgrade: ct.upgrade || 0, build: ct.build || 0 };
 
     let stored = 0;
     for (const s of data.spawns) stored += s.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
@@ -170,11 +170,38 @@ function buildLedgerEntry(room, data) {
         for (const part of (c.body || [])) if (part.type === WORK) workActive++;
     }
 
+    // ---- 用能量守恒反推总支出去向 ----
+    // 恒等式：本 tick 库存 + 收入 - 消耗 = 下 tick 库存。
+    // 以前 spend 只填了 upgrade，其余全 0，导致 net 系统性偏高（预算层据此超额分配）。
+    const storedNow = stored + carried;
+    if (!Memory.fw.ledgerStored) Memory.fw.ledgerStored = {};
+    const prev = Memory.fw.ledgerStored[room.name];
+    Memory.fw.ledgerStored[room.name] = storedNow;
+
+    const incomeHarvest = dHarvest * 2;
+    // 注意：creep 死亡会带走能量（尸体只留 20%），那部分也会算进"消耗"，
+    // 属于可接受的噪声 —— 它确实是从房间能量池里消失的。
+    const spendTotal = (prev === undefined)
+        ? Math.max(0, dUpgrade)
+        : Math.max(0, prev + incomeHarvest - storedNow);
+
+    // 已知分项：升级是 1:1；建造按"每次 build 调用消耗 1 能量"近似（1 WORK 建 5 hit / 5 能量）
+    const dBuild = Math.max(0, (ct.build || 0) - (last.build || 0));
+    p[room.name].build = ct.build || 0;
+    const spendUpgrade = Math.min(spendTotal, dUpgrade);
+    const spendBuild = Math.min(spendTotal - spendUpgrade, dBuild);
+    const spendOther = Math.max(0, spendTotal - spendUpgrade - spendBuild);
+
     return {
-        income: { harvest: dHarvest * 2, passive: 0, link: 0 },
-        // 升级按 1 能量 : 1 progress 折算；其余分项暂未接线
-        spend: { spawn: 0, upkeep: 0, upgrade: dUpgrade * 1, build: 0, tower: 0 },
-        state: { stored: stored + carried, creepCount: data.creeplist.length, workActive: workActive },
+        income: { harvest: incomeHarvest, passive: 0, link: 0 },
+        spend: {
+            spawn: spendOther,          // 孵化 / 塔 / 维护等未细分项先归到这里
+            upkeep: 0,
+            upgrade: spendUpgrade,
+            build: spendBuild,
+            tower: 0,
+        },
+        state: { stored: storedNow, creepCount: data.creeplist.length, workActive: workActive },
     };
 }
 
