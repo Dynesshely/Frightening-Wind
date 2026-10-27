@@ -54,6 +54,16 @@ const DEFAULTS = {
     // 账本样本不足时保守取值（还没测出真实收入）
     warmupSamples: 30,
 
+    // ---- 补员节奏 ----
+    // 提前补位：creep 剩余 TTL 低于该值就排进补员计划（3 tick/s 下 300 tick = 100 秒，
+    // 本地 36 tick/s 下只有 8 秒 —— 必须提前，否则同批老死会造成人口断崖）
+    replaceTtl: 300,
+    // 崩溃救援：总人口低于该值就无视配额与预算，优先补"缺口最大"的岗位。
+    // 阈值取 6 而不是 3：实测 3~4 人时如果缺的是升级者，progress 会完全停摆
+    // （人口够采集、但没人升级），而这时系统仍然"看起来没崩"，不会触发救援。
+    crisisPopulation: 6,
+    // 同角色两次孵化的最小间隔（按孵化时长的一半兜底，避免同批出生、同批老死）
+    spawnGapRatio: 0.5,
     // 搬运工上限（积压补偿时不会无限加人）
     haulerMax: 6,
     // 容器积压超过该值就加人（e）
@@ -189,6 +199,51 @@ function buildersFor(data, bud) {
  *            roles:{miner:number, harvester:number, hauler:number, upgrader:number, builder:number},
  *            bodies:Object, etaMode:string, upkeepCap:{rampart:number, container:number, road:number}}}
  */
+/**
+ * 补员计划：回答"下一只该造谁、为什么"。
+ *
+ * 旧实现（pickSpawnRole）只看"缺口比例"，不知道谁马上就要老死，
+ * 结果就是"同批出生 → 同批死亡 → 人口断崖 → 采集归零 → 攒不起钱 → 补不上人"。
+ * 本地 36 tick/s 推演里这个循环每 4~5 分钟就会重演一次。
+ */
+function buildRecruit(data, roles) {
+    const live = (data.creepsByRole) || {};
+    const dying = {};
+    let total = 0;
+    for (const c of (data.creeplist || [])) {
+        total++;
+        const role = c.memory && c.memory.role;
+        if (!role) continue;
+        const ttl = c.ticksToLive;
+        if (typeof ttl === 'number' && ttl <= DEFAULTS.replaceTtl) {
+            dying[role] = (dying[role] || 0) + 1;
+        }
+    }
+
+    const out = [];
+    for (const role in roles) {
+        const want = Math.max(0, Number(roles[role]) || 0);
+        if (want <= 0) continue;
+        const alive = Math.max(0, Number(live[role]) || 0);
+        const d = Math.max(0, dying[role] || 0);
+        const effective = Math.max(0, alive - d);      // 这批死了之后还剩几个
+        if (effective >= want) continue;
+        out.push({ role: role, missing: want - effective, dying: d });
+    }
+    // 缺口比例大的优先（和旧 pickSpawnRole 的口径一致，但用的是"死后剩余"）
+    out.sort((a, b) => (b.missing / Math.max(1, roles[b.role])) - (a.missing / Math.max(1, roles[a.role])));
+
+    // 崩溃救援：人快没了就别管预算，优先补缺口最大的那个岗位。
+    // 早期版本只补采集者，结果"人口 4、有矿工、没升级者"时 progress 卡死 300 tick 也不救。
+    if (total < DEFAULTS.crisisPopulation && out.length) {
+        out[0].crisis = true;
+    } else if (total < DEFAULTS.crisisPopulation) {
+        // 连缺口都没有（配额已满但人很少）= 目标定得太低，强行补一个采集者
+        out.push({ role: 'miner', missing: 1, dying: 0, crisis: true });
+    }
+    return out;
+}
+
 function plan(room, data, snap, bud) {
     const c = coreCfg();
     const d = data || {};
@@ -321,12 +376,16 @@ function plan(room, data, snap, bud) {
      *   合计 9 人（旧 quota 同房间为 miner 5 + hauler 3 + builder 2 + upgrader 3 = 13 人）。
      * ------------------------------------------------------------------------------------ */
 
+    /* ---- 8. 补员计划：提前补位 + 崩溃救援（节奏由 mgr.spawn 执行） ---- */
+    const recruit = buildRecruit(d, roles);
+
     return {
         target: { yield: targetYield, haulerRate: r4(haulerRate) },
         roles: roles,
         bodies: bodies,
         etaMode: etaMode,
         upkeepCap: upkeepCap,
+        recruit: recruit,
     };
 }
 

@@ -22,6 +22,10 @@ const utils = require('utils');
 const quotaMod = require('quota');
 const roomMgr = require('mgr.room');
 
+// 同角色孵化的最小间隔（tick）。取"中等身体孵化时长的一半"：
+// 10 部件的兵要 30 tick 孵完，隔 15 tick 再开下一个，死亡时间就自然错开了。
+const PART_GAP_TICKS = 15;
+
 /* ------------------------------ Spawn 贴标与利用率 ------------------------------ */
 
 /**
@@ -77,7 +81,16 @@ function runSpawns(room, data) {
     const quota = useV2
         ? Object.assign({}, data.v2plan.roles)
         : quotaMod.computeQuota(room, data);
-    const wanted = quotaMod.pickSpawnRole(data, quota);
+
+    // V2：用 policy 的补员计划（它知道谁快老死、谁在崩溃边缘）。
+    // 旧口径只看"缺口比例"，不知道同步死亡，所以会在同批老死时整段断档。
+    const recruitList = (useV2 && data.v2plan.recruit) ? data.v2plan.recruit : null;
+    const recruitMap = {};
+    if (recruitList) for (const r of recruitList) recruitMap[r.role] = r;
+
+    const wanted = (recruitList && recruitList.length)
+        ? recruitList.map(r => r.role)
+        : quotaMod.pickSpawnRole(data, quota);
 
     // 总数上限：人太多会吃掉全部能量用于更新换代。
     // 但防御者属于应急，允许突破上限（不然房间里有敌人时没人能打）
@@ -136,6 +149,27 @@ function runSpawns(room, data) {
     for (const candidate of candidates) {
         const def = config.bodies[candidate];
         if (!def) continue;
+
+        // 崩溃救援：人口已经快清零，别再等"理想身体"，造最小采集体把线续上。
+        // （1W1C1M = 200 能量：小于它连采集都做不了，所以这是硬下限）
+        const rec = recruitMap[candidate];
+        if (rec && rec.crisis) {
+            const rescue = [WORK, CARRY, MOVE];
+            if (available >= utils.bodyCost(rescue)) {
+                role = candidate;
+                body = rescue;
+                break;
+            }
+            continue;
+        }
+
+        // 错峰：同一角色两次孵化至少隔半个孵化时长，避免同批出生、同批老死
+        if (useV2 && rec) {
+            if (!Memory.fw.v2SpawnAt) Memory.fw.v2SpawnAt = {};
+            const last = Memory.fw.v2SpawnAt[candidate] || 0;
+            const gap = Math.max(6, Math.ceil(PART_GAP_TICKS));
+            if (last && Game.time - last < gap) continue;
+        }
         // V2：policy 已经把"目标体型的完整 body 数组"算好了（含 1:1 的 MOVE 配比），
         // 这里只需要确认能量够付得起。
         if (useV2 && data.v2plan.bodies && data.v2plan.bodies[candidate]) {
@@ -232,6 +266,11 @@ function runSpawns(room, data) {
         console.log('[FW] ' + room.name + ' 孵化了 ' + role + ' (' + body.length + ' 部件 / ' + utils.bodyCost(body) + ' 能量) -> ' + name);
         // 立刻计入配额，避免同一 tick 内其它 spawn 重复制造
         data.creepsByRole[role] = (data.creepsByRole[role] || 0) + 1;
+        // 记录孵化时刻，供"错峰"使用（同一角色两次孵化至少要隔半个孵化时长）
+        if (useV2) {
+            if (!Memory.fw.v2SpawnAt) Memory.fw.v2SpawnAt = {};
+            Memory.fw.v2SpawnAt[role] = Game.time;
+        }
         return;
     }
     if (r === ERR_NOT_ENOUGH_ENERGY) return;
