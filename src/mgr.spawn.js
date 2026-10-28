@@ -204,7 +204,13 @@ function runSpawns(room, data) {
         const minE = spawnCfg.minEnergy || 200;
         if (available < minE) return;
         const waited = wait.t ? (Game.time - wait.t) : 0;
-        if (waited < (spawnCfg.starveTicks || 240)) {
+        // 人口还撑得住的时候**死也不降级**：降级造出来的小兵采集只有大兵的三分之一，
+        // 攒钱速度反而更慢，于是永远停在"小兵 -> 攒不到 -> 造小兵"的循环里。
+        // 线上实测：整房退化到 1W1C1M，矿源堆到 2958/3000 没人挖，progress 掉到 0.05/tick。
+        // 只有人口真的濒危（< starveGuardPopulation）才允许"有多少造多少"续命。
+        const guard = spawnCfg.starveGuardPopulation || 8;
+        const rich = ownedCount >= guard;
+        if (waited < (spawnCfg.starveTicks || 240) || rich) {
             if (!wait.t) { wait.t = Game.time; wait.role = wanted[0] || null; }
             return;
         }
