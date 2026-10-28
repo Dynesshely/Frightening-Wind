@@ -24,6 +24,12 @@ module.exports = {
     // 塔在能量高于该比例时才会用于维修
     towerRepairEnergyRatio: 0.7,
 
+    // 塔的补给策略：存量低于 lowEnergy 时优先补（防御是硬需求，不参与"攒钱"排队）。
+    // 满容量 1000，300 够打 30 次；低于这个线说明真打起来就是空城。
+    tower: {
+        lowEnergy: 300,
+    },
+
     // 角色身体单元：unit 会按能量预算尽量重复，剩余能量用于平衡负载/移速
     bodies: {
         // 经济角色用 tiers：给定能量预算，直接取"造得起且最大"的那一档。
@@ -49,12 +55,16 @@ module.exports = {
             ],
             maxUnits: 8,
         },
-        // 搬运工：只堆 CARRY + MOVE，150 / 300 / 450（载 100 / 200 / 300）
+        // 搬运工：只堆 CARRY + MOVE，150 / 300 / 450 / 600（载 100 / 200 / 300 / 400）
+        // RCL5 容量 1800，24 格往返需要吞吐 ≈ 4 e/tick；6C3M 只有 2.0，8C4M 是 2.67。
+        // （模型 fig30/fig31：距离 24 格、目标 6.67 e/tick 时理论上要 5 个 6C3M 或 3 个 8C4M）
         hauler: {
             tiers: [
                 ['carry', 'carry', 'move'],
                 ['carry', 'carry', 'carry', 'carry', 'move', 'move'],
                 ['carry', 'carry', 'carry', 'carry', 'carry', 'carry', 'move', 'move', 'move'],
+                ['carry', 'carry', 'carry', 'carry', 'carry', 'carry', 'carry', 'carry',
+                 'move', 'move', 'move', 'move'],
             ],
             maxUnits: 10,
         },
@@ -108,8 +118,10 @@ module.exports = {
     // 能量不够就不孵（合法的投资等待），再用 starveTicks 兜底防止人口断档。
     spawn: {
         budget: {
-            miner: 450,             // 3W1C2M（5W 要 600，实测攒不到；450 是能稳定达成的档）
-            hauler: 450,            // 6C3M，载 300
+            // RCL5 容量 1800 之后，450 的预算会把矿工锁死在 3W（3 个矿工 = 9 WORK，
+            // 稳态只有 6.4 e/tick），而目标产出是 7.5。提到 600 才能造 5W1C1M（15 WORK）。
+            miner: 600,             // 5W1C1M
+            hauler: 600,            // 8C4M，载 400
             harvester: 450,
             upgrader: 450,
             builder: 450,

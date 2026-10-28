@@ -270,6 +270,15 @@ function deliverEnergy(creep, data) {
     for (const s of data.spawns) stored += usedEnergyOf(s);
     for (const e of data.extensions) stored += usedEnergyOf(e);
 
+    // 塔保底：防御是硬需求，不能等"攒够了再说"。
+    // 线上实测：spawn+扩展长期 < 350（reserve 线），所以永远走不到后面的塔分支，
+    // 两座塔各 340/1000 一直没人补 —— 真来敌人就是空城。
+    const towerFloor = (config.tower && config.tower.lowEnergy) || 300;   // config.tower.lowEnergy
+    for (const t of data.towers) {
+        if (usedEnergyOf(t) >= towerFloor) continue;
+        if (freeEnergyCap(t) > 0) return transferTo(creep, t);
+    }
+
     if (stored < reserve) {
         const targets = [];
         for (const s of data.spawns) {

@@ -138,8 +138,16 @@ function computeQuota(room, data) {
     const localMining = (utils.countRole(data, 'harvester') || 0) + (utils.countRole(data, 'miner') || 0);
     const localCap = (quota.harvester || 0) + (quota.miner || 0);
     const saturated = localMining >= localCap;
+    // 远程规模：本地饱和后，"多房间 x 多矿工"地外派廉价劳力反哺老家。
+    // pickRemoteTarget 已经支持 skip 参数（按已有 remoteHarvester 数分散到不同房间/矿源），
+    // mgr.spawn 孵化时传的就是 countRole，所以放大编制就会自己铺开。
+    //
+    // ★ 分期推进：先 3 个。实测 6 个时，每个 450 能量的孵化费会直接饿死本地升级端
+    //   （upgrader 掉到 2~3 个、spawn 长期只剩 5~68、progress 从 0.9/tick 掉到 0.16）。
+    //   远程回本要几千 tick（长途运输 + 远程容器 5000 hit），当前 RCL5 才 2.6%，
+    //   本地升级的复利更高。等 progress 稳定在 1.0+ 再逐档加到 4、5、6。
     if (level >= 2 && saturated && data.creeplist.length >= 8) {
-        quota.remoteHarvester = level >= 4 ? 3 : 1;
+        quota.remoteHarvester = level >= 4 ? 3 : 2;
     }
 
     // 道路通畅维保员：常备 1 人（RCL2+），关键节点被堵就拆
@@ -155,7 +163,8 @@ function computeQuota(room, data) {
     // 远程接驳工：有远程矿工时配 1 个（只跑"远程容器 -> 老家"这一段）
     quota.remoteHauler = 0;
     if ((quota.remoteHarvester || 0) > 0 && utils.countRole(data, 'remoteHarvester') >= 2) {
-        quota.remoteHauler = 1;
+        // 每 3 个远程矿工配 1 个接驳工（跨房间往返长，配比要比本地更宽）
+        quota.remoteHauler = Math.min(3, Math.ceil((quota.remoteHarvester || 1) / 3));
     }
 
     // 扩张：① 已占但没 spawn 的房间 -> 派开拓者；② GCL 允许 -> 派占房者
