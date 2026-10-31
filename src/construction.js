@@ -152,6 +152,17 @@ function planConstruction(room, data) {
         if (!spot) break;
         if (createSite(room, spot, STRUCTURE_EXTENSION)) {
             occ[spot.x + ',' + spot.y] = true;
+            // ★ 与相邻扩展保持 1 格间隔（棋盘式）。
+            //   紧贴摆放会连成一堵墙：accessCount 的 BFS 判定"还连通"（缝宽 1 格），
+            //   但十几个 creep 抢一条 1 格缝就变成互堵 —— 线上 W7N1 就是这幅景象
+            //   （扩展排成一条线，单位全卡在缝里，截图确认）。
+            //   把上下左右也标成占用，强制留出"十字通道"。
+            const NB = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const d of NB) {
+                const nx = spot.x + d[0];
+                const ny = spot.y + d[1];
+                if (nx >= 1 && nx <= 48 && ny >= 1 && ny <= 48) occ[nx + ',' + ny] = true;
+            }
             created++;
             extTotal++;
         } else break;

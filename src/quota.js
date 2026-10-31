@@ -62,7 +62,9 @@ function computeQuota(room, data) {
 
     // 搬运工：有容器才需要；能量上限低时先给 1 个（货源不足，多了只会闲置）
     if (containerized > 0) {
-        quota.hauler = capacity < 550 ? 1 : (level >= 5 ? 4 : (level >= 4 ? 3 : 2));
+        // 搬运工基线。模型（fig30/fig31）：8C4M 在 24 格往返吞吐 2.67 e/tick，
+    // 目标 6.67 e/tick 需要 3 个；再算上积压与双向损耗，RCL5 给 4 个打底。
+    quota.hauler = capacity < 550 ? 1 : (level >= 5 ? 4 : (level >= 4 ? 3 : 2));
     }
 
     // 建造者：有工地才需要；工地多时多给（扩建=容量闸门，值得多投人）
@@ -111,20 +113,29 @@ function computeQuota(room, data) {
         ? (level >= 5 ? 4 : 3)
         : (level >= 1 ? 2 : 0);
 
-    // 占领者：RCL3+ 就派（650 能量的 CLAIM 单位，相对 16 E/tick 的收入只是 3%）。
-    // 服务器上有其他玩家/机器人在活动，先把相邻的优质空地"预定"住比省这 650 更划算。
-    quota.reserver = 0;
-    if (level >= 3 && capacity >= 650 && (data.creepsByRole.reserver || 0) === 0) {
-        const target = pickReserveTarget(room);
-        if (target) quota.reserver = 1;
-    }
-
-    // 自适应：容器里明显压货 -> 加搬运工（最多 3 个）
+    // 库存先把算出来：下面多处自适应都要用
     let storedEnergy = 0;
     for (const c of data.containers) storedEnergy += (c.store.getUsedCapacity(RESOURCE_ENERGY) || 0);
     if (data.storage) storedEnergy += (data.storage.store.getUsedCapacity(RESOURCE_ENERGY) || 0);
-    if (containerized > 0 && storedEnergy >= 400 && quota.hauler < 3) {
-        quota.hauler++;
+
+    // 占领者：650 能量的 CLAIM 单位。
+    // ★ 必须加"库存充裕"门槛：它是最贵的一个（650），一旦房间攒不到这个数，
+    //   它会**永远**留在缺口队列里、永远排第一（因为一直没造出来），
+    //   把所有 400/450 的 hauler / remoteHarvester 全压住。
+    //   线上实测：spawnWait.role 长期是 "reserver"、spawnUsage.ratio 恒为 0。
+    quota.reserver = 0;
+    if (level >= 3 && capacity >= 650 && storedEnergy >= 800
+        && (data.creepsByRole.reserver || 0) === 0) {
+        const target = pickReserveTarget(room);
+        if (target) quota.reserver = 1;
+    }
+    // 积压自适应（原来是"最多加到 3"，对 RCL5 完全没用）。
+    // 线上实测：容器堆到 3,700 而 spawn 只有 4~75 —— 典型的运力不足，
+    // 此时每多一个 8C4M 搬运工就等于多 2.67 e/tick 的输送能力。
+    if (containerized > 0 && storedEnergy >= 1000) {
+        quota.hauler = Math.min(8, Math.max(quota.hauler, 4) + 2);
+    } else if (containerized > 0 && storedEnergy >= 400) {
+        quota.hauler = Math.min(8, quota.hauler + 1);
     }
 
     // 自适应：仓储/容器里存量大 -> 加升级者（最多 6 个），把存量变成 RCL
@@ -146,7 +157,10 @@ function computeQuota(room, data) {
     //   （upgrader 掉到 2~3 个、spawn 长期只剩 5~68、progress 从 0.9/tick 掉到 0.16）。
     //   远程回本要几千 tick（长途运输 + 远程容器 5000 hit），当前 RCL5 才 2.6%，
     //   本地升级的复利更高。等 progress 稳定在 1.0+ 再逐档加到 4、5、6。
-    if (level >= 2 && saturated && data.creeplist.length >= 8) {
+    // ★ 加库存门槛：远程矿工的 ratio 一旦低于本地角色，就会长期霸占孵化位，
+    //   把 upgrader 挤到 2 个（线上实测：q3~q8 期间 upgrader 一直是 2、progress 停滞）。
+    //   远程回本要几千 tick，本地升级是即时复利 —— 有余粮才外派。
+    if (level >= 2 && saturated && data.creeplist.length >= 8 && storedEnergy >= 600) {
         quota.remoteHarvester = level >= 4 ? 3 : 2;
     }
 
@@ -342,8 +356,16 @@ function hasStaleNeighbor(roomName) {
 }
 
 function creepCap(room) {
-    // 扩编：给采矿队/护航队腾空间
-    return 12 + Math.floor((room.energyCapacityAvailable || 300) / 100);
+    // 人口上限 = "稳态能养得起多少人"，不是"容量能塞多少人"。
+    //
+    // 旧公式 12 + capacity/100 给 RCL3(650) 算出 18 人，实际那个房间挤了 16 个：
+    //   - 模型算过单兵摊销 0.13 e/tick，RCL3 双源理论产出 6.67 e/tick，
+    //     但实测 η 只有 8~14%（有效产出 ~2 e/tick）→ 真实承载约 15 人
+    //   - 结果：新房间抽干了老房间的能量，老房间反而退化到 1W1C1M
+    //
+    // 改成 6 + capacity/200：RCL3 → 9 人、RCL5 → 15 人、RCL8 → 24 人。
+    // 宁可少养人、让每个人身体长满，也不要一堆 1W1C1M 挤在 extension 之间互堵。
+    return 6 + Math.floor((room.energyCapacityAvailable || 300) / 200);
 }
 
 

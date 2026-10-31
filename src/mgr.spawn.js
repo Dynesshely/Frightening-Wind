@@ -186,13 +186,10 @@ function runSpawns(room, data) {
         if (available < target * 0.95) {
             // 记下"正在为哪个角色攒钱"，fw.store 会据此决定暂停把能量继续灌进 spawn/扩展
             if (!Memory.fw.spawnReserve) Memory.fw.spawnReserve = {};
-            if (!Memory.fw.spawnReserve[room.name]) {
-                Memory.fw.spawnReserve[room.name] = { need: target, role: candidate, t: Game.time };
-            } else {
-                Memory.fw.spawnReserve[room.name].need = Math.max(
-                    Memory.fw.spawnReserve[room.name].need, target);
-                Memory.fw.spawnReserve[room.name].role = candidate;
-            }
+            // ★ need 必须跟着**当前**目标走，不能取 max。
+            //   取 max 的后果：曾经为 650 的 hauler 记下 650，之后即使预算调到 400，
+            //   spawn 也永远在等 650 —— 线上实测 spawnUsage.ratio 只有 0.08（92% 空转）。
+            Memory.fw.spawnReserve[room.name] = { need: target, role: candidate, t: Game.time };
             continue;
         }
         const b = utils.planBody(candidate, Math.min(target, available));
