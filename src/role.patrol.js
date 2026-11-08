@@ -211,20 +211,26 @@ function patroller(creep, data) {
     }
 
     // 4) 巡逻推进（目标锁定：到达并驻留足够才换下一个）
-    if (creep.memory.patrolIndex === undefined) {
-        // 用名字做稳定散列：不同巡逻兵从不同起点出发，且永远不变（不会因人口变化重排）
+    //
+    // ★ 关键：用"房间名"锁定目标，不要用数组下标 ★
+    //   patrolRoute 有 500 tick 缓存，到期会重算；一旦相邻房间的"有敌/无主"状态变化，
+    //   重排后的数组顺序就会变。这时同样的 patrolIndex 会指向**另一个房间** ——
+    //   巡逻兵正在赶往 C 的路上，目标突然变成 A，于是掉头，这就是跨房折返的直接来源
+    //   （线上 8 天里 6 次 nav.oscillate 告警，5 次是 patroller/soldier）。
+    //   改成记住房间名后：只要该房间还在路线里，目标就不变；不在路线里才顺延到下一个。
+    if (!creep.memory.patrolTarget) {
         let h = 0;
         for (let i = 0; i < creep.name.length; i++) h = (h * 31 + creep.name.charCodeAt(i)) % 9973;
-        creep.memory.patrolIndex = h % route.length;
+        creep.memory.patrolTarget = route[h % route.length];
     }
-    const idx = creep.memory.patrolIndex % route.length;
+    const idx = Math.max(0, route.indexOf(creep.memory.patrolTarget));
     const targetRoom = route[idx];
 
     if (creep.room.name !== targetRoom) {
         // 迷路保护：出发 200 tick 还没到目标就换下一个，避免在一个目标上死磕
         if (!creep.memory.patrolSince) creep.memory.patrolSince = Game.time;
         if (Game.time - creep.memory.patrolSince > 200) {
-            creep.memory.patrolIndex = (idx + 1) % route.length;
+            creep.memory.patrolTarget = route[(idx + 1) % route.length];
             creep.memory.patrolSince = Game.time;
             return;
         }
@@ -264,10 +270,10 @@ function patroller(creep, data) {
     }
 
     // 驻留结束：去下一个房间
-    creep.memory.patrolIndex = (idx + 1) % route.length;
+    creep.memory.patrolTarget = route[(idx + 1) % route.length];
     creep.memory.patrolSince = Game.time;
     creep.memory.patrolEntered = undefined;
-    utils.moveToRoom(creep, route[creep.memory.patrolIndex]);
+    utils.moveToRoom(creep, creep.memory.patrolTarget);
 }
 
 module.exports = {

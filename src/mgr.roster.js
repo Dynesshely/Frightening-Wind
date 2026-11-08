@@ -137,9 +137,13 @@ function rebalanceRoles(room, data) {
                     creep.memory.sourceId = containerSources[0].id;
                 }
             }
-            // 远程采集者要目标房间
+            // 远程采集者要目标房间。
+            // ★ 必须传 skip，和 mgr.spawn 孵化时保持一致 ★
+            //   不传的话所有转职过来的远程矿工都会被分到同一个房间的同一个矿源
+            //   （pickRemoteTarget 用 skip 做分散），几个人挤一个矿位，其余矿源没人。
             if (d.role === 'remoteHarvester') {
-                const target = quotaMod.pickRemoteTarget(room, data);
+                const taken = utils.countRole(data, 'remoteHarvester');
+                const target = quotaMod.pickRemoteTarget(room, data, taken);
                 if (!target) continue;
                 creep.memory.targetRoom = target.room;
                 creep.memory.sourceId = target.sourceId;
