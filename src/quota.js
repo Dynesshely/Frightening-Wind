@@ -113,6 +113,35 @@ function computeQuota(room, data) {
         ? (level >= 5 ? 4 : 3)
         : (level >= 1 ? 2 : 0);
 
+    // ★ 控制器降级看门狗 ★
+    // 丢房是**不可逆**的损失：W7N1 就是这样丢掉的（controller 归零后，
+    // 里面 22 个 extension + spawn + tower 全成了废铁，无法回收）。
+    // 而 downgradeTime 只被"有人 upgrade"刷新 —— 一旦升级者被调去干别的，
+    // 就可能在无人察觉的情况下把房间耗掉。
+    // 所以这里做成硬优先级：剩余时间越短，升级者编制越往上顶。
+    const ctrl = room.controller;
+    if (ctrl && ctrl.my && typeof ctrl.ticksToDowngrade === 'number') {
+        const left = ctrl.ticksToDowngrade;
+        const w = config.controllerWatch || {};
+        const warn = w.warnAt || 8000;
+        const danger = w.dangerAt || 3000;
+        if (left < warn) {
+            // 告警只写一次（同一房间同一档位），避免刷屏
+            const fw = Memory.fw || (Memory.fw = {});
+            const key = left < danger ? 'danger' : 'warn';
+            if (!fw.ctrlAlert) fw.ctrlAlert = {};
+            if (fw.ctrlAlert[room.name] !== key) {
+                fw.ctrlAlert[room.name] = key;
+                if (!fw.alerts) fw.alerts = [];
+                fw.alerts.push({ t: Game.time, k: 'controller.' + key,
+                    d: room.name + ' 控制器剩余 ' + left + ' tick 将降级' });
+                if (fw.alerts.length > 60) fw.alerts.shift();
+            }
+        }
+        if (left < warn) quota.upgrader = Math.max(quota.upgrader, level >= 4 ? 5 : 4);
+        if (left < danger) quota.upgrader = Math.max(quota.upgrader, 8);
+    }
+
     // 库存先把算出来：下面多处自适应都要用
     let storedEnergy = 0;
     for (const c of data.containers) storedEnergy += (c.store.getUsedCapacity(RESOURCE_ENERGY) || 0);

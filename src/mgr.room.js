@@ -117,6 +117,26 @@ function writeDiag(room, data) {
         sites: data.sites.length,
         creeps: data.creeplist.length,
         roles: data.creepsByRole,
+        // ★ v2 决策快照：没有它就只能看到"旧配额"，看不到 policy 真正算出的目标人数
+        //   与补员计划，等于闭眼调试（2026-10-31 两次启用 v2 失败都是这么卡住的）。
+        v2: data.v2plan ? {
+            roles: data.v2plan.roles,
+            recruit: data.v2plan.recruit,
+            bodies: Object.keys(data.v2plan.bodies || {}).map(function (k) {
+                return k + ':' + (data.v2plan.bodies[k] || []).length;
+            }),
+            etaMode: data.v2plan.etaMode,
+            upkeepCap: data.v2plan.upkeepCap,
+            snap: data.v2snap ? {
+                income: data.v2snap.income, net: data.v2snap.net,
+                eta: data.v2snap.eta, samples: data.v2snap.samples,
+            } : null,
+            budget: data.v2budget ? {
+                total: data.v2budget.total, upkeep: data.v2budget.upkeep,
+                spawn: data.v2budget.spawn, upgrade: data.v2budget.upgrade,
+                overBudget: data.v2budget.overBudget,
+            } : null,
+        } : null,
     };
 }
 

@@ -71,9 +71,33 @@ function wouldBlockAccess(room, occ, spot, center) {
     return utils.wouldBlockAccess(room, occ, spot, center);
 }
 
+/**
+ * 清理"孤儿工地"：没有 spawn 的房间（已丢房 / 尚未建立）里滞留的工地。
+ *
+ * 丢房之后工地不会自己消失（W7N1 丢了以后留下 12 个工地，每个都在白占工地额度、
+ * 让建造者跑去白干）。这些工地永远建不完 —— 因为建好也没用，房间已经不是我们的了。
+ * 判定：本身不是 spawn 工地，且房间没有我方 spawn 也没有正在孵化的 spawn。
+ */
+function pruneOrphanSites(room, data) {
+    if (!data.sites || !data.sites.length) return;
+    const hasSpawn = (data.spawns && data.spawns.length > 0);
+    const hasSpawnSite = data.sites.some(s => s.structureType === STRUCTURE_SPAWN);
+    if (hasSpawn || hasSpawnSite) return;                  // 正常房间（或正在铺 spawn），不动
+
+    for (const s of data.sites) {
+        // 保留控制器（claim 后能立刻升级）与 spawn 工地，其余全删
+        if (s.structureType === STRUCTURE_SPAWN) continue;
+        if (s.structureType === STRUCTURE_CONTROLLER) continue;
+        console.log('[FW] ' + room.name + ' 清理孤儿工地 ' + s.structureType + ' @' + s.pos.x + ',' + s.pos.y);
+        s.remove();
+    }
+}
+
 function planConstruction(room, data) {
     const level = data.level;
     if (!level) return;
+
+    pruneOrphanSites(room, data);
 
     let created = 0;
     const siteCount = () => data.sites.length + created;

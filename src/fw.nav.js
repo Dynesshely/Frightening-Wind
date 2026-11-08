@@ -265,7 +265,13 @@ function giveUp(creep, n) {
 function noteRoom(creep, n) {
     const here = creep.room.name;
     if (n.lr === here) return;
+
+    // ---- 记录进出方向，供"原路折返"闸门判定 ----
+    const prev = n.lr;
     n.lr = here;
+    n.cr = Game.time;         // 本次进入该房间的 tick
+    n.pr = prev;              // 从哪个房间进来的
+
     if (!n.h) n.h = [];
     n.h.push(Game.time);
     if (n.h.length > 8) n.h.shift();
@@ -273,12 +279,33 @@ function noteRoom(creep, n) {
     const win = config.nav.oscWindow;
     if (n.h.length >= config.nav.oscCount && (Game.time - n.h[0]) < win) {
         if (!n.hold || Game.time >= n.hold) {
-            n.hold = Game.time + config.nav.holdTicks;
+            // 累犯递增：第 1 次冻 base，第 2 次 2x，第 3 次及以上 3x（上限 oscStrikeMax）。
+            // 固定时长对"结构性折返"不够用 —— 冻 120 tick 后它还会原路返回继续晃。
+            n.strike = Math.min((n.strike || 0) + 1, config.nav.oscStrikeMax || 3);
+            const mult = n.strike;
+            const ticks = config.nav.holdTicks * mult;
+            n.hold = Game.time + ticks;
+            creep.memory.navHold = n.hold;      // 同步到 memory：意图重建也不会丢
             log.ct('nav.osc');
-            log.alert('nav.oscillate', creep.name + ' 在 ' + win + ' tick 内跨房间 ' + n.h.length + ' 次，冻结 ' + config.nav.holdTicks + ' tick');
+            log.alert('nav.oscillate', creep.name + ' 在 ' + win + ' tick 内跨房间 ' + n.h.length
+                + ' 次，冻结 ' + ticks + ' tick（第 ' + n.strike + ' 次）');
             n.h = [];
         }
     }
+}
+
+/**
+ * 原路折返闸门：刚进一个房间，就别马上退回去。
+ *
+ * 振荡的本质就是 A→B→A。物理上把它堵死，振荡在结构上就不可能发生 ——
+ * 比"检测到再冻结"更根本（检测永远有窗口期）。
+ * 只拦"退回上一个房间"，不拦"继续前进"，所以正常赶路/远程采集不受影响。
+ */
+function returningTooSoon(creep, n) {
+    if (!n.pr || !n.cr) return false;
+    if (creep.room.name !== n.pr) return false;         // 当前不在上一个房间，谈不上折返
+    const stay = config.nav.minRoomStay || 40;
+    return (Game.time - n.cr) < stay;
 }
 
 /* ------------------------------ 主推进 ------------------------------ */
@@ -289,6 +316,16 @@ function noteRoom(creep, n) {
  */
 function step(creep, n) {
     noteRoom(creep, n);
+
+    // ---- 原路折返闸门（比振荡检测更根本的一道）----
+    // 刚从一个房间过来，就不能马上回去。振荡 = A→B→A，把"退回 A"这条路物理堵死，
+    // 振荡在结构上就不可能出现 —— 而"检测到再冻结"永远有窗口期。
+    // 注意只拦"退回上一个房间"，不拦"继续往前走"，正常赶路不受影响。
+    if (n.r && n.pr && n.r === n.pr && n.cr && (Game.time - n.cr) < (config.nav.minRoomStay || 40)) {
+        log.ct('nav.foldback');
+        if (creep.pos.getRangeTo(25, 25) > config.nav.holdRadius) doMove(creep, n, 25, 25);
+        return false;
+    }
 
     // ---- 跨房间冻结（振荡保护的最终形态）----
     // 两个来源：noteRoom 自动检测到的振荡，以及 roles.run 兜底调用的 freeze()。

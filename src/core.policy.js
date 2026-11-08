@@ -64,6 +64,9 @@ const DEFAULTS = {
     crisisPopulation: 6,
     // 同角色两次孵化的最小间隔（按孵化时长的一半兜底，避免同批出生、同批老死）
     spawnGapRatio: 0.5,
+    // η 低谷时的编制保留比例：0.7 = 最多砍 30%。
+    // 不能更低 —— 采集链一旦断掉，产能归零，η 只会更差（正反馈死循环）。
+    optimizeKeepRatio: 0.7,
     // 搬运工上限（积压补偿时不会无限加人）
     haulerMax: 6,
     // 容器积压超过该值就加人（e）
@@ -318,13 +321,24 @@ function plan(room, data, snap, bud) {
     roles.upgrader = b ? Math.ceil(Math.max(0, b.upgrade) / upgradeCap) : 0;
     roles.builder = buildersFor(d, b);
 
-    /* ---- 5. η 低谷：只减不增（保留最低编制，避免裁空采集链） ---- */
+    /* ---- 5. η 低谷：最多砍 30%，但绝不能"停止补人" ---- */
+    //
+    // ★ 旧实现是 roles = min(roles, alive)，语义是"目标不超过现有人数"。
+    //   看起来温和，实际效果是**永不补人**：
+    //     老死 1 个 -> alive 少 1 -> 目标跟着少 1 -> 再老死 -> 一路掉到 FLOOR(3 人)。
+    //   线上实测：启用 v2 十分钟，人口 13 -> 6、progress 停滞。
+    //
+    //   而且 η=0.235 的真实含义是"矿工大量时间在跑路/待命"，不是"人太多"——
+    //   减人只会让 η 更低（活还是那么多，人少了摊得更开）。
+    //   所以低效时最多收缩 30%，保留采集链的完整编制。
     if (etaMode === 'optimize') {
         const live = (d.creepsByRole) || {};
+        const keep = DEFAULTS.optimizeKeepRatio;   // 0.7
         for (const role in roles) {
             const floor = FLOOR[role] || 0;
             const alive = Math.max(0, Number(live[role]) || 0);
-            roles[role] = Math.max(Math.min(floor, roles[role]), Math.min(roles[role], alive));
+            const shrunk = Math.ceil(roles[role] * keep);
+            roles[role] = Math.max(floor, Math.min(roles[role], Math.max(shrunk, alive)));
         }
     }
 

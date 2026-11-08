@@ -17,7 +17,7 @@ const KEYS = [
     'nav.move', 'nav.tired', 'nav.noPath', 'nav.err',
     'nav.cross', 'nav.exit', 'nav.exitMiss',
     'nav.stuck', 'nav.unstick', 'nav.osc', 'nav.hold',
-    'nav.overtime', 'nav.giveUp',
+    'nav.overtime', 'nav.giveUp', 'nav.foldback',
     // 经济
     'work.harvest', 'work.deliver', 'work.build', 'work.repair', 'work.upgrade',
     // 调度
