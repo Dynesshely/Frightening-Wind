@@ -16,6 +16,7 @@
  * 所有位移必须走 utils.moveTo / utils.moveToRoom（→ fw.nav），禁止直接 creep.moveTo。
  */
 const utils = require('utils');
+const log = require('fw.log');
 
 /* ------------------------------ 远程采集者 ------------------------------ */
 
@@ -83,7 +84,7 @@ function remoteHarvester(creep, data) {
             for (const s of creep.room.find(FIND_STRUCTURES)) {
                 if (s.structureType === STRUCTURE_CONTAINER && (!src || s.pos.getRangeTo(src.pos) <= 2)) { box = s; break; }
             }
-        } catch (e) { }
+        } catch (e) { log.ct('soft.remoteErr'); }
         if (box) {
             utils.transferTo(creep, box);
             return;
@@ -126,7 +127,7 @@ function remoteHauler(creep, data) {
             for (const s of creep.room.find(FIND_STRUCTURES)) {
                 if (s.structureType === STRUCTURE_CONTAINER && (s.store.getUsedCapacity(RESOURCE_ENERGY) || 0) >= 50) { box = s; break; }
             }
-        } catch (e) { }
+        } catch (e) { log.ct('soft.remoteErr'); }
         if (box) { utils.transferFrom(creep, box); return; }
         utils.say(creep, '💤');
         return;

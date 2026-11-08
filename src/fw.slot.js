@@ -1,4 +1,11 @@
-/** 采集站位：可用格计算、独占分配、远程容器探位 */
+/**
+ * fw.slot —— 采集站位：可用格计算、独占分配、远程容器探位。
+ *
+ * 本模块大量使用 lookForAt，正常不会抛异常；一旦抛了说明参数或房间对象有问题，
+ * 而下方 catch 会把异常变成"这格不能站"，进而让 creep 卡死。
+ * 所以每处 catch 都计一个 soft.slotErr —— 沉默降级必须可观测（AGENTS.md）。
+ */
+const log = require('fw.log');
 
 
 
@@ -7,7 +14,7 @@ function walkableOnContainer(room, x, y) {
         for (const s of room.lookForAt(LOOK_STRUCTURES, x, y)) {
             if (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD) return true;
         }
-    } catch (e) { }
+    } catch (e) { log.ct('soft.slotErr'); }
     return false;
 }
 
@@ -30,7 +37,7 @@ function slotList(source) {
                 for (const s of room.lookForAt(LOOK_STRUCTURES, x, y)) {
                     if (s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_CONTAINER && s.structureType !== STRUCTURE_RAMPART) blocked = true;
                 }
-            } catch (e) { }
+            } catch (e) { log.ct('soft.slotErr'); }
             if (!blocked) out.push({ x: x, y: y, onContainer: walkableOnContainer(room, x, y) });
         }
     }
@@ -130,7 +137,7 @@ function harvestSlots(source) {
                     // 路/容器/rampart 能站人，其它结构挡位
                     if (s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_CONTAINER && s.structureType !== STRUCTURE_RAMPART) blocked = true;
                 }
-            } catch (e) { }
+            } catch (e) { log.ct('soft.slotErr'); }
             if (!blocked) slots++;
         }
     }
@@ -146,12 +153,12 @@ function remoteBoxStatus(room, source) {
         for (const s of room.find(FIND_STRUCTURES)) {
             if (s.structureType === STRUCTURE_CONTAINER && s.pos.getRangeTo(source.pos) <= 2) { out.hasBox = true; return out; }
         }
-    } catch (e) { }
+    } catch (e) { log.ct('soft.slotErr'); }
     try {
         for (const s of room.find(FIND_CONSTRUCTION_SITES)) {
             if (s.structureType === STRUCTURE_CONTAINER && s.pos.getRangeTo(source.pos) <= 2) { out.site = s; return out; }
         }
-    } catch (e) { }
+    } catch (e) { log.ct('soft.slotErr'); }
     // 没有容器也没有工地：看有没有可开的空位（要求本房 RCL>=2，容器数量未超限）
     out.canBuild = slotList(source).length > 0;
     return out;
@@ -167,7 +174,7 @@ function createRemoteBox(room, source) {
     try {
         const r = room.createConstructionSite(target.x, target.y, STRUCTURE_CONTAINER);
         if (r === OK) return target.x + ',' + target.y;
-    } catch (e) { }
+    } catch (e) { log.ct('soft.slotErr'); }
     return null;
 }
 

@@ -251,8 +251,12 @@ function runSpawns(room, data) {
         // 士兵和巡逻兵共用扇区编号，保证覆盖不重叠
         memory.sector = utils.countRole(data, 'patroller') + utils.countRole(data, 'soldier');
     } else if (role === 'patroller') {
+        // sector 只用于"不同巡逻兵从不同起点出发"的散列偏移。
+        // ★ 不要写 patrolIndex ★ —— 那是已废弃的字段：
+        //   巡逻目标现在按**房间名**锁定（role.patrol 的 patrolTarget），
+        //   用下标会在 patrolRoute 缓存到期重排后指向另一个房间，造成跨房折返。
         memory.sector = utils.countRole(data, 'patroller');
-        memory.patrolIndex = memory.sector;
+        memory.patrolTarget = undefined;
     } else if (role === 'reserver') {
         const target = quotaMod.pickReserveTarget(room);
         if (!target) return;

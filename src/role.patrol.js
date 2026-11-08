@@ -14,6 +14,8 @@
  */
 const config = require('config');
 const utils = require('utils');
+const tidyMod = require('role.tidy');
+const log = require('fw.log');
 
 /**
  * 顺手清障：作业半径 3 格内发现不可通行的建筑就拆掉。
@@ -31,14 +33,14 @@ const WALKABLE_TYPES = (function () {
 function keyNodes(room) {
     const nodes = [];
     // spawn：正交四向要深查到 3 格（基地主通道，最容易被扩展堵死）
-    try { for (const s of room.find(FIND_MY_SPAWNS)) nodes.push({ pos: s.pos, deep: 3 }); } catch (e) { }
+    try { for (const s of room.find(FIND_MY_SPAWNS)) nodes.push({ pos: s.pos, deep: 3 }); } catch (e) { log.ct('soft.patrolErr'); }
     try {
         for (const s of room.find(FIND_STRUCTURES)) {
             if (s.structureType === STRUCTURE_CONTAINER) nodes.push({ pos: s.pos, deep: 1 });
         }
-    } catch (e) { }
+    } catch (e) { log.ct('soft.patrolErr'); }
     if (room.controller) nodes.push({ pos: room.controller.pos, deep: 1 });
-    try { for (const s of room.find(FIND_SOURCES)) nodes.push({ pos: s.pos, deep: 1 }); } catch (e) { }
+    try { for (const s of room.find(FIND_SOURCES)) nodes.push({ pos: s.pos, deep: 1 }); } catch (e) { log.ct('soft.patrolErr'); }
     return nodes;
 }
 
@@ -83,6 +85,12 @@ function roadKeeper(creep, data) {
         const st = firstBlocker(room, nodes[i].pos, nodes[i].deep || 1);
         if (st) {
             utils.say(creep, '🚧');
+            // ★ 下发成正式任务 ★
+            //   以前这里直接 creep.dismantle，但 roadKeeper 没有任何 BEHAVIORS 注册，
+            //   于是"发现堵路就拆"从来没被调用过，role.tidy 的整条链路也是死的。
+            //   现在改成写 memory.demolish，由 roles.run 统一执行 ——
+            //   任何路过、带 WORK 的单位都能接手，不依赖某个专职角色存在。
+            if (tidyMod.assignDemolish(creep, st.pos)) return;
             const r = creep.dismantle(st);
             if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, st);
             return;
@@ -148,6 +156,23 @@ function patrolRoute(home) {
 function patroller(creep, data) {
     const home = creep.memory.home || creep.room.name;
     const hostiles = data.hostiles || [];
+
+    // 0) 在家时顺手巡检关键节点：发现"扩展/建筑堵住了主通道"就下发拆障任务。
+    //    这一段是 role.tidy 拆障链路的生产端 —— 没有它，整条链路永远不会启动。
+    //    只在家房间做，且只在没敌人时做（有敌人先打仗）。
+    if (creep.room.name === home && !hostiles.length && !creep.memory.demolish) {
+        const nodes = keyNodes(creep.room);
+        for (let i = 0; i < nodes.length; i++) {
+            const st = firstBlocker(creep.room, nodes[i].pos, nodes[i].deep || 1);
+            if (st) {
+                // 只拆"我们自己的、能拆的"非关键结构（不拆 spawn/controller/矿源/墙）
+                if (st.structureType === STRUCTURE_SPAWN || st.structureType === STRUCTURE_WALL) break;
+                if (st.structureType === STRUCTURE_CONTROLLER) break;
+                tidyMod.assignDemolish(creep, st.pos);
+                return;
+            }
+        }
+    }
 
     // 1) 老家被袭：优先回防
     const homeHostiles = (creep.room.name === home) ? hostiles : [];

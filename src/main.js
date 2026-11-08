@@ -12,7 +12,19 @@ module.exports.loop = function () {
         // 代码热更新检测（全局对象在每次代码上传后重置）
         if (!global.__fw || global.__fw.version !== config.version) {
             global.__fw = { version: config.version, startedAt: Game.time };
-            console.log('[FW] ' + config.name + ' v' + config.version + ' 已加载 | tick ' + Game.time);
+            // ★ 部署后保护期 ★
+            // 每次上传代码 global 都会重置，而 Memory 是持久的：
+            //   - spawnReserve / spawnWait 这类"正在攒钱"的临时状态会失效
+            //   - creep.memory.roleSince 还是旧值，mgr.roster 会按新配额立刻重排角色
+            // 结果就是每部署一次，人口和体型就抖一次（线上实测：13 人全员退化成 1W1C1M，
+            // progress 停摆十几分钟）。所以给一个冷静期：这段时间内只维持现状，不重排角色。
+            Memory.fw = Memory.fw || {};
+            Memory.fw.bootAt = Game.time;
+            // 清掉可能残留的攒钱状态，让 spawn 重新决策
+            if (Memory.fw.spawnReserve) Memory.fw.spawnReserve = {};
+            if (Memory.fw.spawnWait) Memory.fw.spawnWait = {};
+            console.log('[FW] ' + config.name + ' v' + config.version + ' 已加载 | tick ' + Game.time
+                + ' | 进入 ' + (config.bootGraceTicks || 300) + ' tick 冷静期');
         }
 
         economy.housekeeping();

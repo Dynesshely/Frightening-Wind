@@ -120,8 +120,17 @@ function harvestSource(creep, data) {
     if (!source) return false;
     say(creep, '⛏');
     const hr = creep.harvest(source);
-    if (hr === OK) bump('harvest');
-    else if (hr === ERR_NOT_IN_RANGE) moveTo(creep, source, { range: 1 });   // source 格不可站
+    if (hr === OK) {
+        bump('harvest');
+        // ★ 记录**实际产出的能量**，而不是调用次数 ★
+        //   一次 harvest() 的产量 = 2 × WORK 部件数（1 WORK = 2 e/tick）。
+        //   以前账本按"调用次数 × 2"算收入，5W 矿工被低估 5 倍 ——
+        //   结果 net 恒为负、预算恒为 0、policy 永远判定 overBudget。
+        let works = 0;
+        for (const part of (creep.body || [])) if (part.type === WORK) works++;
+        // ★ 必须用 log.add（累加数值），不能 bump（log.ct 只 +1，第二参数被忽略）
+        if (works > 0) log.add('harvestEnergy', works * 2);
+    } else if (hr === ERR_NOT_IN_RANGE) moveTo(creep, source, { range: 1 });   // source 格不可站
     else bump('harvestErr_' + hr);
     return true;
 }

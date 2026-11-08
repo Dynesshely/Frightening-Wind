@@ -10,6 +10,10 @@ module.exports = {
     // 每多少 tick 在控制台打印一次状态报告
     reportInterval: 25,
 
+    // 部署后冷静期（tick）。这段时间内 mgr.roster 不做角色重排，
+    // 避免"代码一上传人口就抖一次"（线上实测会退化到 1W1C1M 并停摆十几分钟）。
+    bootGraceTicks: 300,
+
     // 每个房间允许同时存在的工地数量上限（宁少勿多，让建造者集中火力）
     maxSitesPerRoom: 8,
     maxSitesPerRoomHighRcl: 10,
@@ -194,9 +198,9 @@ module.exports = {
     // 这是所有角色共用的最后一道兜底，防止出现站在房间边界不动几百 tick 的哨兵。
     idleTicksBeforeHome: 12,
     connectMinExits: 6,         // 建造选址：spawn 至少保留几个可达出口
-    patrolLowHits: 0.45,        // 巡逻兵血量低于该比例回塔疗伤
-    fleeRange: 4,               // 威胁型敌人进入该范围才撤退
-    towerRepairRatio: 0.7,      // 塔能量高于该比例才参与维修
+    // 注意：巡逻/撤退/塔维修的阈值统一在下面 patrolHealRatio / mgr.flee / towerRepairEnergyRatio 处，
+    // 这里原本三个键（patrolLowHits / fleeRange / towerRepairRatio）没人读，已删除 ——
+    // 参数分散在两处最容易改错一处不生效。
 
     // 侦察：进危险房间后最多停留多少 tick（信息一拿到就走）
     reconStayTicks: 3,
@@ -271,6 +275,15 @@ module.exports = {
         //     miner 4 -> 1（采集链在断）。说明还有第三处导致"不补人"。
         //   待办：把 v2plan 写进 diag（现在 diag.quota 是旧 quotaMod 的，看不到 policy 输出），
         //         再用本地高速推演定位 recruit 计划为什么没被执行。
+        // v2 启用记录（三次都回滚，暂不启用）：
+        //   第 1 次：optimize 的 min(roles, alive) = 永不补人 → 人口 13->6、progress 停滞
+        //   第 2 次：修完上面那条后人口仍 11->6，miner 4->1
+        //   第 3 次（2026-11-08，代码审查后）：挖出计数器的三层 bug
+        //     a) 能量守恒漏统计 tower/link → net 恒负（实测 -7.95，真实应接近 0）
+        //     b) bump() 只 +1，第二参数被忽略 → harvestEnergy 记不上量
+        //     c) harvest 记调用次数而非能量 → 5W 矿工收入被低估 5 倍
+        //   三条都已修，但「计数器换代」还要观察确认（旧基准 > 新值会让 income 恒 0）。
+        //   在 income 数据可信之前启用 v2，它会按 overBudget 收缩、主动制造小兵循环。
         v2: false,
 
         // L0 账本：滑动窗口长度（tick）与 Memory 里最多保留的样本数

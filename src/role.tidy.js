@@ -15,6 +15,7 @@
  * 所有位移必须走 utils.moveTo / utils.moveToRoom（→ fw.nav），禁止直接 creep.moveTo。
  */
 const utils = require('utils');
+const log = require('fw.log');
 
 /* ------------------------------ 周边整理 ------------------------------ */
 
@@ -55,7 +56,35 @@ function tidyNearby(creep) {
  */
 function bumpDemolish(creep) {
     creep.memory.demolishTicks = (creep.memory.demolishTicks || 0) + 1;
-    if (creep.memory.demolishTicks > 400) { creep.memory.demolish = undefined; creep.memory.demolishTicks = 0; }
+    if (creep.memory.demolishTicks > 400) {
+        creep.memory.demolish = undefined;
+        creep.memory.demolishTicks = 0;
+        // 拆不动就记一笔，外部能看到"哪个格子一直拆不掉"
+        log.ct('soft.tidyGiveUp');
+        log.alert('tidy.giveUp', creep.name + ' 拆障超时放弃 ('
+            + (creep.memory._demolishLast || '?') + ')');
+    }
+}
+
+/**
+ * 下发拆障任务的**唯一入口**。
+ *
+ * 历史上 runDemolishTask 一直存在但没有任何地方写 memory.demolish ——
+ * 整条疏通链路是死的（这也解释了为什么 extension 堵路只能靠肉眼发现）。
+ * 现在由 role.patrol 的关键节点巡检调用它。
+ *
+ * @param {Creep}  creep  执行者（任何带 WORK 的单位）
+ * @param {Object} pos    {x, y} 要拆掉的那一格
+ * @returns {boolean}     是否成功下发
+ */
+function assignDemolish(creep, pos) {
+    if (!creep || !creep.memory || !pos) return false;
+    if (creep.memory.demolish) return false;          // 已经在拆别的，别覆盖
+    creep.memory.demolish = { x: pos.x, y: pos.y };
+    creep.memory.demolishTicks = 0;
+    creep.memory._demolishLast = pos.x + ',' + pos.y;
+    log.ct('soft.tidyAssign');
+    return true;
 }
 
 /**
@@ -79,4 +108,5 @@ module.exports = {
     tidyNearby,
     bumpDemolish,
     runDemolishTask,
+    assignDemolish,
 };

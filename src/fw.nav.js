@@ -480,7 +480,15 @@ function freeze(creep, ticks) {
     log.ct('nav.osc');
 }
 
-/** 是否处于跨房间冻结期 */
+/**
+ * 是否处于跨房间冻结期。
+ *
+ * ★ 只认 creep.memory.navHold ★
+ *   因为两个写入点（noteRoom 的振荡检测、freeze() 的外部刹车）都写 memory.navHold。
+ *   历史上这里还有过第二个 frozen() 定义读 n.hold，同名函数被后者覆盖 ——
+ *   结果 freeze() 写了没人读，travelFrozen() 永远返回 false。
+ *   同一个语义**只允许有一个实现**，改这里之前先 grep 确认没有第二份。
+ */
 function frozen(creep) {
     return !!(creep.memory && creep.memory.navHold && Game.time < creep.memory.navHold);
 }
@@ -495,12 +503,6 @@ function targetRoom(creep) {
 function expired(creep) {
     const n = intent(creep);
     return !n || !n.u || Game.time > n.u;
-}
-
-/** 是否处于振荡冻结中 */
-function frozen(creep) {
-    const n = intent(creep);
-    return !!(n && n.hold && Game.time < n.hold);
 }
 
 module.exports = {

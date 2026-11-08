@@ -94,6 +94,23 @@ function housekeeping() {
         if (!creep.memory.home) creep.memory.home = creep.room.name;
     }
 
+    // V2 关闭时清理它的 Memory 残留。
+    // ledger2 一个房间就是 300 条流水（实测 28KB，占整个 Memory 的一半），
+    // tasks2 还有 6.8KB —— 这些在 v2 关闭时完全没人读，纯占地方。
+    // 只在关闭时清，避免误删正在使用的数据。
+    if (!(config.core && config.core.v2)) {
+        const fw = Memory.fw;
+        // ★ counters 不在这个列表里 ★ 它是 economy 的通用差值计数器（harvest/upgrade/build），
+        //   不属于 v2。清掉会让下一 tick 的差值从 0 起算，支出被算成爆增。
+        const v2Keys = ['ledger2', 'tasks2', 'v2SpawnAt', 'v2Errors', 'ledgerStored', 'ledgerLast', 'v2Diag'];
+        let any = false;
+        for (const k of v2Keys) { if (fw[k] !== undefined) { any = true; break; } }
+        if (any && Game.time % 500 === 0) {          // 每 500 tick 检查一次，别每 tick 都遍历
+            for (const k of v2Keys) delete fw[k];
+            console.log('[FW] v2 已关闭，清理其 Memory 残留');
+        }
+    }
+
     Memory.fw.version = config.version;
 }
 
@@ -153,22 +170,50 @@ function buildLedgerEntry(room, data) {
     // ★ 计数器键名是 fw.log 白名单里的 'work.harvest' / 'work.upgrade' / 'work.build'，
     //   不是裸的 harvest/upgrade/build。曾用错键名导致 income 恒为 0 →
     //   预算恒为 0 → 不造升级者 → 本地推演 progress 卡死 8 分钟（三个修复都没救回来）。
-    const ctHarvest = ct['work.harvest'] || ct.harvest || 0;
-    const ctUpgrade = ct['work.upgrade'] || ct.upgrade || 0;
-    const ctBuild = ct['work.build'] || ct.build || 0;
+    // 优先用"实际产出能量"计数器；没有时退回调用次数（×2 近似，仅供平滑过渡）。
+    // harvestEnergy / upgradeEnergy 是按 body 的 WORK 数累加的，这才是真实收支。
+    const ctHarvest = ct['harvestEnergy'] !== undefined
+        ? ct['harvestEnergy']
+        : (ct['work.harvest'] || ct.harvest || 0) * 2;
+    const ctUpgrade = ct['upgradeEnergy'] !== undefined
+        ? ct['upgradeEnergy']
+        : (ct['work.upgrade'] || ct.upgrade || 0);
+    const ctBuild = ct['buildEnergy'] !== undefined
+        ? ct['buildEnergy']
+        : (ct['work.build'] || ct.build || 0);
 
     if (!Memory.fw.counters) Memory.fw.counters = {};
     const p = Memory.fw.counters;
-    const last = p[room.name] || { harvest: ctHarvest, upgrade: ctUpgrade, build: ctBuild };
+    let last = p[room.name] || { harvest: ctHarvest, upgrade: ctUpgrade, build: ctBuild };
+    // ★ 计数器换代保护 ★
+    //   从"调用次数"换成"实际能量"后，新计数器的值远小于旧基准（34 万 vs 105 万），
+    //   直接相减会得到负数 → Math.max(0,..) → income 恒为 0。
+    //   一旦发现基准比当前值还大，说明换代了，重置基准。
+    if (last.harvest > ctHarvest || last.upgrade > ctUpgrade) {
+        last = { harvest: ctHarvest, upgrade: ctUpgrade, build: ctBuild };
+    }
     const dHarvest = Math.max(0, ctHarvest - (last.harvest || 0));
     const dUpgrade = Math.max(0, ctUpgrade - (last.upgrade || 0));
     p[room.name] = { harvest: ctHarvest, upgrade: ctUpgrade, build: ctBuild };
 
+    // ★ 能量守恒的等式必须覆盖**所有**能存能量的容器 ★
+    //   以前只统计 spawn/extension/container/storage，漏掉了 tower 和 link。
+    //   后果：creep 把能量倒进 tower 时，stored 反而下降 → 等式把它算成"消耗"，
+    //   于是 spend 虚高（实测 net = -7.95 e/tick，真实值应该接近 0），
+    //   预算层据此判定 overBudget → 全部预算归零 → policy 收缩到 EP 状态。
     let stored = 0;
-    for (const s of data.spawns) stored += s.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
-    for (const e of data.extensions) stored += e.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
-    for (const c of data.containers) stored += c.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
-    if (data.storage) stored += data.storage.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+    const countStore = (o) => {
+        if (!o || !o.store || !o.store.getUsedCapacity) return;
+        stored += o.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+    };
+    for (const s of data.spawns) countStore(s);
+    for (const e of data.extensions) countStore(e);
+    for (const c of data.containers) countStore(c);
+    for (const t of (data.towers || [])) countStore(t);      // 漏过：塔里常有上千能量
+    for (const l of (data.links || [])) countStore(l);       // 漏过：link 也是能量池
+    countStore(data.storage);
+    countStore(data.terminal);
+    for (const lab of (data.labs || [])) countStore(lab);
 
     let carried = 0;
     let workActive = 0;
@@ -185,7 +230,7 @@ function buildLedgerEntry(room, data) {
     const prev = Memory.fw.ledgerStored[room.name];
     Memory.fw.ledgerStored[room.name] = storedNow;
 
-    const incomeHarvest = dHarvest * 2;
+    const incomeHarvest = dHarvest;      // 已经是能量值，不再乘 2
     // 注意：creep 死亡会带走能量（尸体只留 20%），那部分也会算进"消耗"，
     // 属于可接受的噪声 —— 它确实是从房间能量池里消失的。
     const spendTotal = (prev === undefined)

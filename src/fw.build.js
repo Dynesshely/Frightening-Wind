@@ -142,8 +142,13 @@ function upgradeController(creep, room) {
     if (!controller || !controller.my) return false;
     say(creep, '⚡');
     const r = creep.upgradeController(controller);
-    if (r === OK) bump('upgrade');
-    else if (r === ERR_NOT_IN_RANGE) moveTo(creep, controller);
+    if (r === OK) {
+        bump('upgrade');
+        // 记录实际投入的能量（1 WORK = 1 e/tick 升级），供账本算真实支出
+        let works = 0;
+        for (const part of (creep.body || [])) if (part.type === WORK) works++;
+        if (works > 0) require('fw.log').add('upgradeEnergy', works);
+    } else if (r === ERR_NOT_IN_RANGE) moveTo(creep, controller);
     else bump('upgradeErr_' + r);
     return true;
 }

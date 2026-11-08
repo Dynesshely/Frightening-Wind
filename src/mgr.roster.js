@@ -82,6 +82,13 @@ function canDo(creep, role) {
  * 好处是岗位空缺立刻补上，不用等 spawn 造人（造人要 3*部件数 tick + 攒能量）。
  */
 function rebalanceRoles(room, data) {
+    // 部署后冷静期：global 重置会清掉 spawnReserve 等临时状态，但 creep.memory.roleSince
+    // 是持久的。这时候立刻按新配额重排，会把刚孵化/刚转职的单位再转一次，
+    // 结果是"每次部署人口抖一次、体型退化到 1W1C1M、progress 停摆十几分钟"。
+    // 冷静期内只维持现状（miner 仍然挖矿、upgrader 仍然升级），不转职也不回收。
+    const bootAt = (Memory.fw && Memory.fw.bootAt) || 0;
+    if (bootAt && (Game.time - bootAt) < (config.bootGraceTicks || 300)) return;
+
     // V2 架构下角色目标由 core.policy 给出。这里如果还用旧配额表，
     // 会出现"spawn 按 v2 的低编制造人、roster 按旧的高编制转职/回收"的内耗 ——
     // 本地推演实测：spawn 100% 忙、人口卡在 4、progress 恒为 0。
@@ -149,7 +156,8 @@ function rebalanceRoles(room, data) {
                 creep.memory.sourceId = target.sourceId;
             }
 
-            if (cur && (Game.time - (creep.memory.roleSince || 0)) < 150) continue;   // 滞回：刚转职的先别动
+            // 滞回：刚转职的先别动（阈值在 config.roleHysteresis，别再写死 150）
+            if (cur && (Game.time - (creep.memory.roleSince || 0)) < (config.roleHysteresis || 150)) continue;
             creep.memory.role = d.role;
             creep.memory.roleSince = Game.time;
             creep.memory.working = undefined;

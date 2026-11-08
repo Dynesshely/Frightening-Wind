@@ -197,11 +197,12 @@ function computeQuota(room, data) {
     // 道路保障员编制已取消：改由矿工/建造者在作业途中顺手清障
     quota.roadKeeper = 0;
 
-    // 护航军：远程采集队成规模后 1~2 人贴身护航
+    // 护航军：**暂不启用**。
+    // 曾经这里会配 1~2 个 escort，但 mgr.spawn 没有 escort 的目标分配分支
+    // （role.soldier.escort 需要知道"跟谁走"，孵化时没人写这个字段），
+    // 结果只是凭空花 400 能量造一个没人指挥的兵。
+    // 要做护航的话，先给 mgr.spawn 补 follow 目标分配，再在这里打开编制。
     quota.escort = 0;
-    if ((quota.remoteHarvester || 0) > 0 && utils.countRole(data, 'remoteHarvester') >= 2) {
-        quota.escort = Math.min(2, Math.floor(utils.countRole(data, 'remoteHarvester') / 2));
-    }
 
     // 远程接驳工：有远程矿工时配 1 个（只跑"远程容器 -> 老家"这一段）
     quota.remoteHauler = 0;

@@ -18,8 +18,15 @@ const KEYS = [
     'nav.cross', 'nav.exit', 'nav.exitMiss',
     'nav.stuck', 'nav.unstick', 'nav.osc', 'nav.hold',
     'nav.overtime', 'nav.giveUp', 'nav.foldback',
+    // 沉默降级：这些地方用了 try/catch 兜住异常后继续跑，
+    // 必须至少留一个计数，否则"某处一直在抛异常"会完全不可见（AGENTS.md 要求）。
+    'soft.slotErr', 'soft.patrolErr', 'soft.remoteErr', 'soft.warErr',
+    'soft.tidyAssign', 'soft.tidyGiveUp',
     // 经济
     'work.harvest', 'work.deliver', 'work.build', 'work.repair', 'work.upgrade',
+    // 实际产出的能量（= WORK 部件数 × 2），用于账本算真实收入。
+    // 不能用 harvest 调用次数代替：5W 矿工一次调用产 10 能量，按次数×2 会低估 5 倍。
+    'harvestEnergy', 'upgradeEnergy', 'buildEnergy',
     // 调度
     'spawn.ok', 'spawn.fail', 'spawn.idle',
     // 兼容旧键名（历史看板仍在读）

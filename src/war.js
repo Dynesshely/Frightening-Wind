@@ -9,6 +9,7 @@
  */
 const config = require('config');
 const utils = require('utils');
+const log = require('fw.log');
 
 /** 单个敌对单位的战力与血量（按 body 实测，无视野时用经验值估算） */
 function evalHostile(creep) {
@@ -144,7 +145,7 @@ function pickTarget(homeName, radius) {
                 value += (info.src || 0) * 25;
                 if (info.ctrl && info.ctrl !== 'none') value += 40;
             }
-        } catch (e) { }
+        } catch (e) { log.ct('soft.warErr'); }
         const score = t.count * 100 + t.dps - value;
         if (!best || score < best.score) best = { name: name, threat: t, score: score, value: value };
     }
